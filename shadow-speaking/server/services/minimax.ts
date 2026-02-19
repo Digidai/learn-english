@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { stripMarkdown } from "./preprocessor";
 
 // --- LLM Analysis ---
 
@@ -234,8 +235,22 @@ export async function preprocessMaterial(
       .bind(materialId)
       .run();
 
-    // Step 1: LLM analysis
-    const analysis = await analyzeSentence(apiKey, sentence);
+    // Clean markdown/URLs from text for TTS and analysis
+    const cleanText = stripMarkdown(sentence);
+    if (cleanText.length < 2) {
+      throw new Error("Content too short after stripping markdown");
+    }
+
+    // Also update stored content to cleaned version if different
+    if (cleanText !== sentence) {
+      await db
+        .prepare("UPDATE materials SET content = ? WHERE id = ?")
+        .bind(cleanText, materialId)
+        .run();
+    }
+
+    // Step 1: LLM analysis (use cleaned text)
+    const analysis = await analyzeSentence(apiKey, cleanText);
 
     // Step 2: Generate 3 TTS versions in parallel
     const speeds = [
@@ -246,7 +261,7 @@ export async function preprocessMaterial(
 
     await Promise.all(
       speeds.map(async ({ speed, key }) => {
-        const tts = await generateTTS(apiKey, sentence, speed);
+        const tts = await generateTTS(apiKey, cleanText, speed);
         // Stream directly to R2 — avoids buffering entire file in memory
         await r2.put(key, tts.audioStream, {
           httpMetadata: { contentType: tts.contentType },

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Form, useActionData, useNavigation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
-import { isEnglish, splitSentences, checkDuplicates } from "../../server/services/preprocessor";
+import { isEnglish, splitSentences, stripMarkdown, checkDuplicates } from "../../server/services/preprocessor";
 import { preprocessMaterial } from "../../server/services/minimax";
 import { createMaterial } from "../../server/db/queries";
 import type { Route } from "./+types/_app.input";
@@ -29,8 +29,9 @@ export async function action({ request, context }: Route.ActionArgs) {
     return { error: "请输入英文内容", sentences: null, submittedText: text };
   }
 
-  // Split into sentences
-  const sentences = splitSentences(text);
+  // Strip markdown formatting, then split into sentences
+  const cleanedText = stripMarkdown(text);
+  const sentences = splitSentences(cleanedText).filter((s) => s.length >= 5);
   if (sentences.length === 0) {
     return { error: "未检测到有效句子", sentences: null, submittedText: text };
   }

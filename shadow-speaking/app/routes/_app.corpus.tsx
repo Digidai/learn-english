@@ -1,6 +1,7 @@
-import { Link, useLoaderData, useSearchParams } from "react-router";
+import { Link, useLoaderData, useSearchParams, Form, useNavigation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { getUserMaterials } from "../../server/db/queries";
+import { preprocessMaterial } from "../../server/services/minimax";
 import { LEVEL_LABELS, type Level } from "~/lib/constants";
 import type { Route } from "./+types/_app.corpus";
 
@@ -30,19 +31,74 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     offset,
   });
 
+  // Count failed materials for showing retry button
+  const failedCount = await env.DB.prepare(
+    "SELECT COUNT(*) as count FROM materials WHERE user_id = ? AND preprocess_status = 'failed'"
+  ).bind(user.id).first<{ count: number }>();
+
   return {
     materials,
     total,
     page,
     totalPages: Math.ceil(total / limit),
     filters: { status, level, search },
+    failedCount: failedCount?.count || 0,
   };
 }
 
+export async function action({ request, context }: Route.ActionArgs) {
+  const env = context.cloudflare.env;
+  const user = await requireAuth(request, env);
+  const formData = await request.formData();
+  const intent = String(formData.get("intent"));
+
+  if (intent === "retry-all-failed") {
+    // Get all failed materials
+    const failed = await env.DB.prepare(
+      "SELECT id, content FROM materials WHERE user_id = ? AND preprocess_status = 'failed'"
+    ).bind(user.id).all<{ id: string; content: string }>();
+
+    if (failed.results.length === 0) return null;
+
+    // Reset all to pending (CAS: only reset if still failed)
+    await env.DB.batch(
+      failed.results.map((m) =>
+        env.DB.prepare(
+          "UPDATE materials SET preprocess_status = 'pending' WHERE id = ? AND preprocess_status = 'failed'"
+        ).bind(m.id)
+      )
+    );
+
+    // Trigger async preprocessing
+    const apiKey = env.MINIMAX_API_KEY;
+    if (apiKey) {
+      context.cloudflare.ctx.waitUntil(
+        (async () => {
+          const BATCH_SIZE = 3;
+          for (let i = 0; i < failed.results.length; i += BATCH_SIZE) {
+            const batch = failed.results.slice(i, i + BATCH_SIZE);
+            await Promise.allSettled(
+              batch.map((m) =>
+                preprocessMaterial(apiKey, m.content, m.id, user.id, env.DB, env.R2)
+              )
+            );
+          }
+        })()
+      );
+    }
+
+    return { retried: failed.results.length };
+  }
+
+  return null;
+}
+
 export default function CorpusPage() {
-  const { materials, total, page, totalPages, filters } =
+  const { materials, total, page, totalPages, filters, failedCount } =
     useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = useNavigation();
+  const isRetrying = navigation.state === "submitting";
 
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -149,6 +205,23 @@ export default function CorpusPage() {
           </button>
         ))}
       </div>
+
+      {/* Failed items retry banner */}
+      {failedCount > 0 && (
+        <div className="mb-4 flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <span className="text-sm text-red-700">{failedCount} 条语料处理失败</span>
+          <Form method="post">
+            <input type="hidden" name="intent" value="retry-all-failed" />
+            <button
+              type="submit"
+              disabled={isRetrying}
+              className="text-sm text-red-600 font-medium hover:text-red-700 disabled:opacity-50"
+            >
+              {isRetrying ? "处理中..." : "全部重试"}
+            </button>
+          </Form>
+        </div>
+      )}
 
       {/* Count */}
       <p className="text-sm text-gray-400 mb-3">{total} 条语料</p>

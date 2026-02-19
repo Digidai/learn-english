@@ -1,3 +1,28 @@
+/**
+ * Strip markdown formatting from text, producing clean English sentences.
+ * Removes: [text](url) → text, **bold** → bold, ## headers, - bullets, etc.
+ */
+export function stripMarkdown(text: string): string {
+  let cleaned = text;
+  // Remove markdown links: [text](url) → text
+  cleaned = cleaned.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  // Remove standalone URLs
+  cleaned = cleaned.replace(/https?:\/\/[^\s)]+/g, "");
+  // Remove markdown headers: ## Header → Header
+  cleaned = cleaned.replace(/^#{1,6}\s+/gm, "");
+  // Remove bold/italic markers: **text** → text, *text* → text
+  cleaned = cleaned.replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1");
+  // Remove leading bullet markers: - item → item
+  cleaned = cleaned.replace(/^\s*[-*+]\s+/gm, "");
+  // Remove inline code backticks
+  cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
+  // Collapse multiple spaces and trim
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+  // Remove empty parentheses left over from URL removal
+  cleaned = cleaned.replace(/\(\s*\)/g, "").trim();
+  return cleaned;
+}
+
 // Language detection: returns true if text is primarily English
 export function isEnglish(text: string): boolean {
   // Remove common punctuation and numbers
