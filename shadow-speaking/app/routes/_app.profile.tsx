@@ -33,13 +33,14 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     user,
     stats,
     practiceDates: calendar.results.map((r) => r.practice_date),
+    todayBeijing,
   };
 }
 
 const DAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
 
 export default function ProfilePage() {
-  const { user, stats, practiceDates } = useLoaderData<typeof loader>();
+  const { user, stats, practiceDates, todayBeijing } = useLoaderData<typeof loader>();
   const u = user as unknown as AuthUser;
   const s = stats as unknown as {
     total: number;
@@ -50,13 +51,11 @@ export default function ProfilePage() {
   };
   const dates = practiceDates as unknown as string[];
 
-  // Compute calendar start day-of-week for alignment
-  const now = new Date();
-  const chinaMs = now.getTime() + 8 * 60 * 60 * 1000;
-  const todayChina = new Date(chinaMs);
+  // Use server-provided Beijing date for calendar consistency
+  const todayMs = new Date(todayBeijing as string).getTime();
   // First day of calendar (29 days ago)
-  const startDate = new Date(chinaMs);
-  startDate.setUTCDate(todayChina.getUTCDate() - 29);
+  const startMs = todayMs - 29 * 86400000;
+  const startDate = new Date(startMs);
   // Day of week for the start date (0=Sun, 6=Sat)
   const startDow = startDate.getUTCDay();
 
@@ -199,8 +198,7 @@ export default function ProfilePage() {
             <div key={`empty-${i}`} />
           ))}
           {Array.from({ length: 30 }, (_, i) => {
-            const d = new Date(chinaMs);
-            d.setUTCDate(todayChina.getUTCDate() - 29 + i);
+            const d = new Date(startMs + i * 86400000);
             const dateStr = d.toISOString().slice(0, 10);
             const hasPractice = dates.includes(dateStr);
             const isToday = i === 29;

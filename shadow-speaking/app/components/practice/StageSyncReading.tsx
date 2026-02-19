@@ -141,9 +141,18 @@ export function StageSyncReading({
 
       {silentWarning && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-          <p className="text-sm text-red-700">
+          <p className="text-sm text-red-700 mb-3">
             没有检测到声音，请大声跟读。跟读时出声是练习有效的关键。
           </p>
+          <button
+            onClick={() => {
+              setSilentWarning(false);
+              setPhase("record");
+            }}
+            className="w-full py-2 text-sm text-red-700 border border-red-300 rounded-lg hover:bg-red-100 transition-colors"
+          >
+            重新录音
+          </button>
         </div>
       )}
 

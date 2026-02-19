@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLoaderData, Form, redirect, useNavigation } from "react-router";
+import { Link, useLoaderData, Form, redirect, useNavigation, useNavigate } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { getMaterial, getMaterialRecordings, deleteMaterial } from "../../server/db/queries";
 import { preprocessMaterial } from "../../server/services/minimax";
@@ -33,7 +33,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const intent = String(formData.get("intent"));
 
   if (intent === "delete") {
-    await deleteMaterial(env.DB, params.id!, user.id);
+    await deleteMaterial(env.DB, params.id!, user.id, env.R2);
     return redirect("/corpus");
   }
 
@@ -66,6 +66,26 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   return null;
 }
 
+function formatDateChinese(dateStr: string | null): string {
+  if (!dateStr) return "—";
+  // Compute Beijing "today" from UTC
+  const now = new Date();
+  const chinaMs = now.getTime() + 8 * 60 * 60 * 1000;
+  const todayStr = new Date(chinaMs).toISOString().slice(0, 10);
+
+  const todayDate = new Date(todayStr);
+  const targetDate = new Date(dateStr);
+  const diffDays = Math.round((targetDate.getTime() - todayDate.getTime()) / (86400000));
+
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "明天";
+  if (diffDays === -1) return "昨天";
+
+  const month = targetDate.getUTCMonth() + 1;
+  const day = targetDate.getUTCDate();
+  return `${month}月${day}日`;
+}
+
 function safeJsonParse<T>(json: string | null, fallback: T): T {
   if (!json) return fallback;
   try {
@@ -86,6 +106,7 @@ export default function CorpusDetailPage() {
   const isRetrying = submittingIntent === "retry";
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const navigate = useNavigate();
   const m = material as unknown as Material;
   const recs = recordings as unknown as Recording[];
 
@@ -113,12 +134,15 @@ export default function CorpusDetailPage() {
   return (
     <div>
       {/* Back link */}
-      <Link to="/corpus" className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 mb-4">
+      <button
+        onClick={() => navigate(-1)}
+        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 mb-4"
+      >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
         </svg>
         返回语料库
-      </Link>
+      </button>
 
       {/* Main content */}
       <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-4">
@@ -188,13 +212,13 @@ export default function CorpusDetailPage() {
           </div>
           <div>
             <p className="text-lg font-semibold text-gray-900">
-              {m.next_review_date || "—"}
+              {formatDateChinese(m.next_review_date)}
             </p>
             <p className="text-xs text-gray-400">下次复习</p>
           </div>
           <div>
             <p className="text-lg font-semibold text-gray-900">
-              {m.last_practice_date || "—"}
+              {formatDateChinese(m.last_practice_date)}
             </p>
             <p className="text-xs text-gray-400">上次练习</p>
           </div>

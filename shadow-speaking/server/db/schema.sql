@@ -108,3 +108,7 @@ CREATE TABLE IF NOT EXISTS recordings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_recordings_material ON recordings(material_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_plan_items_plan_id ON plan_items(plan_id);
+CREATE INDEX IF NOT EXISTS idx_practice_records_user_id ON practice_records(user_id);
+CREATE INDEX IF NOT EXISTS idx_practice_records_material_id ON practice_records(material_id);
+CREATE INDEX IF NOT EXISTS idx_recordings_practice_record_id ON recordings(practice_record_id);

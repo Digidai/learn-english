@@ -126,7 +126,22 @@ export async function generateDailyPlan(
     );
   }
 
-  await db.batch(statements);
+  try {
+    await db.batch(statements);
+  } catch (err) {
+    // Unique constraint violation (TOCTOU race) — plan was already created concurrently
+    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+      const existing = await db
+        .prepare("SELECT id, total_items FROM daily_plans WHERE user_id = ? AND plan_date = ?")
+        .bind(user.id, planDate)
+        .first<{ id: string; total_items: number }>();
+      if (existing) {
+        return { planId: existing.id, totalItems: existing.total_items };
+      }
+      return null;
+    }
+    throw err;
+  }
 
   return { planId, totalItems: allItems.length };
 }

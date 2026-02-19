@@ -68,7 +68,16 @@ export async function action({ request, context }: Route.ActionArgs) {
   await recordLoginAttempt(env.KV, username, true);
   const token = await createSession(env.KV, user.id);
 
-  return redirect("/today", {
+  // Check if user has completed onboarding
+  const fullUser = await env.DB.prepare(
+    "SELECT onboarding_completed FROM users WHERE id = ?"
+  )
+    .bind(user.id)
+    .first<{ onboarding_completed: number }>();
+
+  const destination = fullUser?.onboarding_completed ? "/today" : "/onboarding";
+
+  return redirect(destination, {
     headers: {
       "Set-Cookie": setSessionCookie(token),
     },

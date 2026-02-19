@@ -10,10 +10,12 @@ interface Props {
 export function StageListening({ content, audioNormalSrc, onComplete }: Props) {
   const [playCount, setPlayCount] = useState(0);
   const [showWarning, setShowWarning] = useState(false);
+  const [warningShown, setWarningShown] = useState(false);
 
   const handleReady = () => {
-    if (playCount <= 1) {
+    if (playCount <= 1 && !warningShown) {
       setShowWarning(true);
+      setWarningShown(true);
     } else {
       onComplete();
     }

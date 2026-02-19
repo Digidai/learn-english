@@ -125,6 +125,9 @@ export default function InputPage() {
             placeholder="Type or paste English text here..."
             disabled={isSubmitting}
           />
+          <p className={`text-xs text-right mt-1 ${text.length > 4500 ? "text-red-500" : "text-gray-400"}`}>
+            {text.length}/5000
+          </p>
 
           <div className="mt-4 flex justify-end">
             <button

@@ -10,6 +10,15 @@ export async function handleDailyPlanCron(env: Env): Promise<void> {
 
   console.log(`[Cron] Generating daily plans for ${planDate}`);
 
+  // Recovery: reset materials stuck in 'processing' for > 5 minutes back to 'pending'
+  const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+  const stuckReset = await env.DB.prepare(
+    "UPDATE materials SET preprocess_status = 'pending' WHERE preprocess_status = 'processing' AND created_at < ?"
+  ).bind(fiveMinutesAgo).run();
+  if (stuckReset.meta.changes > 0) {
+    console.log(`[Cron] Reset ${stuckReset.meta.changes} stuck processing materials`);
+  }
+
   // Get all users
   const users = await env.DB.prepare(
     "SELECT id, level, daily_minutes FROM users WHERE onboarding_completed = 1"

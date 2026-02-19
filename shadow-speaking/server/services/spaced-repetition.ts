@@ -41,6 +41,20 @@ export function calculateNextReview(
     };
   }
 
+  // "fair" rating: keep review_count the same, use half interval
+  if (practice.selfRating === "fair") {
+    const intervalIndex = Math.min(
+      Math.max(material.review_count - 1, 0),
+      REVIEW_INTERVALS.length - 1
+    );
+    const halfInterval = Math.max(1, Math.floor(REVIEW_INTERVALS[intervalIndex] / 2));
+    return {
+      reviewCount: material.review_count,
+      nextReviewDate: addDays(today, halfInterval),
+      newStatus: material.status === "unlearned" ? "learning" : material.status,
+    };
+  }
+
   const newReviewCount = material.review_count + 1;
 
   // Calculate next interval

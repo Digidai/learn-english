@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { Form, redirect, useLoaderData, useActionData, useNavigation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { COLD_START_PACKS, importColdStartPack } from "../../server/services/cold-start";
+import { preprocessMaterial } from "../../server/services/minimax";
+import { LEVEL_LABELS, type Level } from "~/lib/constants";
 import type { Route } from "./+types/onboarding";
 
 export function meta() {
@@ -49,10 +51,41 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (step === "packs") {
     const selectedPacks = formData.getAll("packs") as string[];
     let totalImported = 0;
+    const allMaterialIds: string[] = [];
+    const allSentences: string[] = [];
     for (const packId of selectedPacks) {
-      const count = await importColdStartPack(env.DB, user.id, packId);
-      totalImported += count;
+      const result = await importColdStartPack(env.DB, user.id, packId);
+      totalImported += result.count;
+      allMaterialIds.push(...result.materialIds);
+      allSentences.push(...result.sentences);
     }
+
+    // Trigger async preprocessing via waitUntil
+    const apiKey = env.MINIMAX_API_KEY;
+    if (apiKey && allMaterialIds.length > 0) {
+      context.cloudflare.ctx.waitUntil(
+        (async () => {
+          const BATCH_SIZE = 3;
+          for (let i = 0; i < allSentences.length; i += BATCH_SIZE) {
+            const batch = allSentences.slice(i, i + BATCH_SIZE);
+            const batchIds = allMaterialIds.slice(i, i + BATCH_SIZE);
+            await Promise.allSettled(
+              batch.map((sentence, j) =>
+                preprocessMaterial(
+                  apiKey,
+                  sentence,
+                  batchIds[j],
+                  user.id,
+                  env.DB,
+                  env.R2
+                )
+              )
+            );
+          }
+        })()
+      );
+    }
+
     return { step: "packs", success: true, imported: totalImported };
   }
 
@@ -163,11 +196,11 @@ export default function OnboardingPage() {
 
             <div className="space-y-3 mb-6">
               {[
-                { level: 1, label: "L1 · 入门", desc: "简单问候和日常短句" },
-                { level: 2, label: "L2 · 基础", desc: "日常对话，含简单从句" },
-                { level: 3, label: "L3 · 中级", desc: "复合句，被动语态" },
-                { level: 4, label: "L4 · 中高级", desc: "多重从句，专业表达" },
-                { level: 5, label: "L5 · 高级", desc: "学术长难句" },
+                { level: 1 as Level, desc: "简单问候和日常短句" },
+                { level: 2 as Level, desc: "日常对话，含简单从句" },
+                { level: 3 as Level, desc: "复合句，被动语态" },
+                { level: 4 as Level, desc: "多重从句，专业表达" },
+                { level: 5 as Level, desc: "学术长难句" },
               ].map((item) => (
                 <button
                   key={item.level}
@@ -178,7 +211,7 @@ export default function OnboardingPage() {
                       : "border-gray-200 hover:border-gray-300"
                   }`}
                 >
-                  <p className="font-medium text-gray-900">{item.label}</p>
+                  <p className="font-medium text-gray-900">{LEVEL_LABELS[item.level]}</p>
                   <p className="text-sm text-gray-500">{item.desc}</p>
                 </button>
               ))}

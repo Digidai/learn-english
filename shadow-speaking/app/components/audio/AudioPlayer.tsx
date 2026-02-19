@@ -68,9 +68,24 @@ export function AudioPlayer({ src, label, onEnded, autoPlay, showCount }: AudioP
   }
 
   return (
-    <div className="bg-gray-50 rounded-xl p-4">
+    <div className="bg-gray-50 rounded-xl p-4 relative">
       {label && (
         <p className="text-xs text-gray-500 mb-2">{label}</p>
+      )}
+
+      {/* iOS autoplay fallback overlay */}
+      {player.needsManualPlay && (
+        <div className="absolute inset-0 bg-white/90 rounded-xl flex items-center justify-center z-10">
+          <button
+            onClick={player.play}
+            className="flex items-center gap-2 px-5 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            点击播放
+          </button>
+        </div>
       )}
 
       <div className="flex items-center gap-3">

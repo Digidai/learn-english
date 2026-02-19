@@ -20,15 +20,15 @@ export async function checkLevelProgression(
     return { shouldUpgrade: false, inObservation: false };
   }
 
-  // Condition 2: Last 7 days completion rate > 80%
+  // Condition 2: Last 7 days completion rate > 80% (exclude today)
   const recentPlans = await db
     .prepare(
       `SELECT plan_date, completed_items, total_items
        FROM daily_plans
-       WHERE user_id = ? AND plan_date >= date(?, '-7 days')
+       WHERE user_id = ? AND plan_date >= date(?, '-7 days') AND plan_date < ?
        ORDER BY plan_date DESC`
     )
-    .bind(userId, today)
+    .bind(userId, today, today)
     .all<{ plan_date: string; completed_items: number; total_items: number }>();
 
   if (recentPlans.results.length < 3) {
@@ -53,15 +53,15 @@ export async function checkRetirementProtection(
   userId: string,
   today: string
 ): Promise<{ shouldReduceNew: boolean }> {
-  // Check if last 3 days completion rate < 50%
+  // Check if last 3 days completion rate < 50% (exclude today)
   const recentPlans = await db
     .prepare(
       `SELECT completed_items, total_items
        FROM daily_plans
-       WHERE user_id = ? AND plan_date >= date(?, '-3 days')
+       WHERE user_id = ? AND plan_date >= date(?, '-3 days') AND plan_date < ?
        ORDER BY plan_date DESC`
     )
-    .bind(userId, today)
+    .bind(userId, today, today)
     .all<{ completed_items: number; total_items: number }>();
 
   if (recentPlans.results.length < 3) {

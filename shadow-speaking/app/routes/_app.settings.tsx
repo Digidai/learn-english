@@ -1,4 +1,5 @@
-import { Form, useLoaderData, useActionData, useNavigation } from "react-router";
+import { useState } from "react";
+import { Form, Link, useLoaderData, useActionData, useNavigation } from "react-router";
 import { requireAuth, type AuthUser } from "~/lib/auth.server";
 import { LEVEL_LABELS, type Level } from "~/lib/constants";
 import type { Route } from "./+types/_app.settings";
@@ -49,6 +50,8 @@ export default function SettingsPage() {
   const isSubmitting = navigation.state === "submitting";
 
   const u = user as unknown as AuthUser;
+  const [selectedMinutes, setSelectedMinutes] = useState(u.daily_minutes);
+  const [selectedLevel, setSelectedLevel] = useState(u.level);
 
   return (
     <div>
@@ -67,21 +70,24 @@ export default function SettingsPage() {
         <h3 className="text-sm font-medium text-gray-500 mb-4">每日练习时长</h3>
         <Form method="post" className="space-y-3">
           <input type="hidden" name="intent" value="update_duration" />
+          <input type="hidden" name="daily_minutes" value={selectedMinutes} />
           <div className="flex gap-3">
             {[10, 20, 30].map((m) => (
               <label
                 key={m}
+                onClick={() => setSelectedMinutes(m)}
                 className={`flex-1 text-center p-3 rounded-xl border cursor-pointer transition-colors ${
-                  u.daily_minutes === m
+                  selectedMinutes === m
                     ? "border-blue-500 bg-blue-50 text-blue-600"
                     : "border-gray-200 hover:border-gray-300 text-gray-700"
                 }`}
               >
                 <input
                   type="radio"
-                  name="daily_minutes"
+                  name="_daily_minutes"
                   value={m}
-                  defaultChecked={u.daily_minutes === m}
+                  checked={selectedMinutes === m}
+                  onChange={() => setSelectedMinutes(m)}
                   className="sr-only"
                 />
                 <p className="font-semibold">{m}</p>
@@ -107,21 +113,24 @@ export default function SettingsPage() {
         </p>
         <Form method="post" className="space-y-3">
           <input type="hidden" name="intent" value="update_level" />
+          <input type="hidden" name="level" value={selectedLevel} />
           <div className="space-y-2">
             {[1, 2, 3, 4, 5].map((l) => (
               <label
                 key={l}
+                onClick={() => setSelectedLevel(l)}
                 className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
-                  u.level === l
+                  selectedLevel === l
                     ? "border-blue-500 bg-blue-50"
                     : "border-gray-200 hover:border-gray-300"
                 }`}
               >
                 <input
                   type="radio"
-                  name="level"
+                  name="_level"
                   value={l}
-                  defaultChecked={u.level === l}
+                  checked={selectedLevel === l}
+                  onChange={() => setSelectedLevel(l)}
                   className="sr-only"
                 />
                 <span className="text-sm font-medium text-gray-900">
@@ -141,12 +150,12 @@ export default function SettingsPage() {
       </div>
 
       {/* Back link */}
-      <a
-        href="/profile"
+      <Link
+        to="/profile"
         className="block text-center text-sm text-blue-600 hover:text-blue-700"
       >
         返回个人中心
-      </a>
+      </Link>
     </div>
   );
 }

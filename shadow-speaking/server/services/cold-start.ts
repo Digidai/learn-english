@@ -82,13 +82,19 @@ export const COLD_START_PACKS: ColdStartPack[] = [
   },
 ];
 
+export interface ColdStartImportResult {
+  count: number;
+  materialIds: string[];
+  sentences: string[];
+}
+
 export async function importColdStartPack(
   db: D1Database,
   userId: string,
   packId: string
-): Promise<number> {
+): Promise<ColdStartImportResult> {
   const pack = COLD_START_PACKS.find((p) => p.id === packId);
-  if (!pack) return 0;
+  if (!pack) return { count: 0, materialIds: [], sentences: [] };
 
   // Batch check for duplicates
   const dupChecks = pack.sentences.map((s) =>
@@ -103,19 +109,26 @@ export async function importColdStartPack(
     (_, i) => !dupResults[i]?.results || dupResults[i].results.length === 0
   );
 
-  if (toImport.length === 0) return 0;
+  if (toImport.length === 0) return { count: 0, materialIds: [], sentences: [] };
+
+  // Generate IDs upfront so we can return them
+  const materialIds = toImport.map(() => crypto.randomUUID());
 
   // Batch insert all new materials
-  const insertStatements = toImport.map((sentence) =>
+  const insertStatements = toImport.map((sentence, i) =>
     db
       .prepare(
         `INSERT INTO materials (id, user_id, content, source_type, level, tags, preprocess_status)
          VALUES (?, ?, ?, 'cold_start', ?, ?, 'pending')`
       )
-      .bind(crypto.randomUUID(), userId, sentence.content, sentence.level, JSON.stringify(sentence.tags))
+      .bind(materialIds[i], userId, sentence.content, sentence.level, JSON.stringify(sentence.tags))
   );
 
   await db.batch(insertStatements);
 
-  return toImport.length;
+  return {
+    count: toImport.length,
+    materialIds,
+    sentences: toImport.map((s) => s.content),
+  };
 }

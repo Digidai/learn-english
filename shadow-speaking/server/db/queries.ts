@@ -39,6 +39,23 @@ export async function createMaterial(
   return id;
 }
 
+export async function createMaterialsBatch(
+  db: D1Database,
+  userId: string,
+  sentences: string[]
+): Promise<string[]> {
+  const ids = sentences.map(() => crypto.randomUUID());
+  const statements = sentences.map((content, i) =>
+    db
+      .prepare(
+        "INSERT INTO materials (id, user_id, content, source_type) VALUES (?, ?, ?, 'direct')"
+      )
+      .bind(ids[i], userId, content)
+  );
+  await db.batch(statements);
+  return ids;
+}
+
 export async function getMaterial(
   db: D1Database,
   materialId: string
@@ -103,13 +120,44 @@ export async function getUserMaterials(
 export async function deleteMaterial(
   db: D1Database,
   materialId: string,
-  userId: string
+  userId: string,
+  r2: R2Bucket
 ): Promise<boolean> {
-  const result = await db
-    .prepare("DELETE FROM materials WHERE id = ? AND user_id = ?")
+  // Read R2 keys before deleting rows
+  const material = await db
+    .prepare("SELECT audio_slow_key, audio_normal_key, audio_fast_key FROM materials WHERE id = ? AND user_id = ?")
     .bind(materialId, userId)
-    .run();
-  return result.meta.changes > 0;
+    .first<{ audio_slow_key: string | null; audio_normal_key: string | null; audio_fast_key: string | null }>();
+
+  if (!material) return false;
+
+  // Get recording R2 keys for this material
+  const recordings = await db
+    .prepare("SELECT r2_key FROM recordings WHERE material_id = ?")
+    .bind(materialId)
+    .all<{ r2_key: string }>();
+
+  // Delete R2 objects (audio files + recordings)
+  const r2Keys = [
+    material.audio_slow_key,
+    material.audio_normal_key,
+    material.audio_fast_key,
+    ...recordings.results.map((r) => r.r2_key),
+  ].filter((k): k is string => !!k);
+
+  if (r2Keys.length > 0) {
+    await r2.delete(r2Keys);
+  }
+
+  // Cascade delete dependent rows + material in a batch
+  await db.batch([
+    db.prepare("DELETE FROM recordings WHERE material_id = ?").bind(materialId),
+    db.prepare("DELETE FROM practice_records WHERE material_id = ?").bind(materialId),
+    db.prepare("DELETE FROM plan_items WHERE material_id = ?").bind(materialId),
+    db.prepare("DELETE FROM materials WHERE id = ? AND user_id = ?").bind(materialId, userId),
+  ]);
+
+  return true;
 }
 
 export async function updateMaterialTags(

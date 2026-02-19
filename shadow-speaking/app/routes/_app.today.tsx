@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useLoaderData, Form, useNavigation, useSearchParams } from "react-router";
+import { useState, useEffect } from "react";
+import { Link, useLoaderData, Form, useNavigation, useSearchParams, useRevalidator } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { getTodayPlan } from "../../server/db/queries";
 import { generateDailyPlan } from "../../server/services/plan-generator";
@@ -57,6 +57,7 @@ export default function TodayPage() {
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const notice = searchParams.get("notice");
 
+  const revalidator = useRevalidator();
   const u = user as unknown as { streak_days: number; total_practice_days: number };
 
   const typedItems = items as Array<{
@@ -72,6 +73,18 @@ export default function TodayPage() {
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
   const allDone = completedCount === totalCount && totalCount > 0;
   const hasStartedItems = typedItems.some((i) => i.status !== "pending");
+  const hasPendingPreprocess = typedItems.some((i) => i.preprocess_status === "pending");
+
+  // Auto-poll every 5 seconds when there are items still being preprocessed
+  useEffect(() => {
+    if (!hasPendingPreprocess) return;
+    const interval = setInterval(() => {
+      if (revalidator.state === "idle") {
+        revalidator.revalidate();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [hasPendingPreprocess, revalidator]);
 
   if (!plan || items.length === 0) {
     return (
@@ -166,9 +179,20 @@ export default function TodayPage() {
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm text-gray-500">今日进度</span>
-          <span className="text-sm font-medium text-gray-900">
-            {completedCount}/{totalCount}
-          </span>
+          <div className="flex items-center gap-2">
+            {hasPendingPreprocess && (
+              <button
+                onClick={() => revalidator.revalidate()}
+                disabled={revalidator.state !== "idle"}
+                className="text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
+              >
+                {revalidator.state !== "idle" ? "刷新中..." : "刷新"}
+              </button>
+            )}
+            <span className="text-sm font-medium text-gray-900">
+              {completedCount}/{totalCount}
+            </span>
+          </div>
         </div>
         <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
           <div

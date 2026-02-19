@@ -1,9 +1,12 @@
-import { Link, Outlet, useLocation } from "react-router";
+import { Link, Outlet, redirect, useLocation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import type { Route } from "./+types/_app";
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const user = await requireAuth(request, context.cloudflare.env);
+  if (!user.onboarding_completed) {
+    throw redirect("/onboarding");
+  }
   return { user };
 }
 

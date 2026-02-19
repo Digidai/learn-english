@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback, useRef } from "react";
-import { AudioPlayer } from "~/components/audio/AudioPlayer";
-import { AudioRecorder } from "~/components/audio/AudioRecorder";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useAudioPlayer } from "~/hooks/useAudioPlayer";
+import { useAudioRecorder } from "~/hooks/useAudioRecorder";
 import { useSilenceDetection } from "~/hooks/useSilenceDetection";
 
 interface Props {
@@ -33,9 +33,41 @@ export function StageShadowing({
   );
   const [showRetryPrompt, setShowRetryPrompt] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [shadowingActive, setShadowingActive] = useState(false);
   const silenceDetection = useSilenceDetection();
   const silenceRef = useRef(silenceDetection);
   silenceRef.current = silenceDetection;
+
+  // Unified audio player + recorder for simultaneous play+record
+  const player = useAudioPlayer({
+    onEnded: () => {
+      // Audio ended — auto-stop recording after a short delay
+      autoStopTimerRef.current = setTimeout(async () => {
+        if (recorderRef.current.isRecording) {
+          const result = await recorder.stopRecording();
+          if (result) {
+            handleRecordingComplete(result.blob);
+          }
+        }
+        setShadowingActive(false);
+      }, 2000);
+    },
+  });
+  const recorder = useAudioRecorder({
+    onStreamReady: (stream: MediaStream) => {
+      silenceRef.current.startMonitoring(stream);
+    },
+  });
+  const recorderRef = useRef(recorder);
+  recorderRef.current = recorder;
+  const autoStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup auto-stop timer
+  useEffect(() => {
+    return () => {
+      if (autoStopTimerRef.current) clearTimeout(autoStopTimerRef.current);
+    };
+  }, []);
 
   const words = content.split(" ");
 
@@ -102,9 +134,42 @@ export function StageShadowing({
     }
   };
 
-  const handleStreamReady = useCallback((stream: MediaStream) => {
-    silenceRef.current.startMonitoring(stream);
-  }, []);
+  // Load audio source when it changes
+  useEffect(() => {
+    if (audioNormalSrc) {
+      player.load(audioNormalSrc);
+    }
+  }, [audioNormalSrc]);
+
+  const startShadowing = useCallback(async () => {
+    try {
+      await recorder.startRecording();
+      navigator.vibrate?.(50);
+      // Start audio playback alongside recording
+      player.replay();
+      setShadowingActive(true);
+      if (autoStopTimerRef.current) {
+        clearTimeout(autoStopTimerRef.current);
+        autoStopTimerRef.current = null;
+      }
+    } catch {
+      // Permission denied — recorder handles state internally
+    }
+  }, [recorder, player]);
+
+  const stopShadowingManually = useCallback(async () => {
+    if (autoStopTimerRef.current) {
+      clearTimeout(autoStopTimerRef.current);
+      autoStopTimerRef.current = null;
+    }
+    player.pause();
+    navigator.vibrate?.(50);
+    const result = await recorder.stopRecording();
+    if (result) {
+      handleRecordingComplete(result.blob);
+    }
+    setShadowingActive(false);
+  }, [recorder, player]);
 
   const handleRecordingComplete = (blob: Blob) => {
     const key = `stage4-round${round}-${Date.now()}`;
@@ -172,17 +237,35 @@ export function StageShadowing({
         </div>
       )}
 
-      {/* Audio player */}
-      <AudioPlayer
-        src={audioNormalSrc}
-        label="常速 1.0x"
-      />
-
-      {/* Recorder */}
-      <AudioRecorder
-        onRecordingComplete={handleRecordingComplete}
-        onStreamReady={handleStreamReady}
-      />
+      {/* Unified shadowing control */}
+      {!currentRoundDone && (
+        <div className="flex flex-col items-center gap-3">
+          {shadowingActive ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+                <span className="text-sm text-red-600 font-medium">跟读中...</span>
+              </div>
+              <button
+                onClick={stopShadowingManually}
+                className="w-full py-3 bg-red-500 text-white font-medium rounded-xl hover:bg-red-600 transition-colors active:scale-95"
+              >
+                停止跟读
+              </button>
+              {!player.isPlaying && (
+                <p className="text-xs text-amber-600">音频已结束，可以继续说完或点击停止</p>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={startShadowing}
+              className="w-full py-3 bg-purple-600 text-white font-medium rounded-xl hover:bg-purple-700 transition-colors active:scale-95"
+            >
+              开始跟读
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Show original text after recording */}
       {showOriginal && (round === 2 || round === 3) && (

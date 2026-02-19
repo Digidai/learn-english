@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useNavigation } from "react-router";
 import { usePracticeFlow } from "~/hooks/usePracticeFlow";
 import { StageComprehension } from "./StageComprehension";
@@ -45,6 +45,44 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Focus trap + Escape for exit dialog
+  useEffect(() => {
+    if (!showExitConfirm) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const focusableButtons = dialog.querySelectorAll<HTMLButtonElement>("button");
+    if (focusableButtons.length === 0) return;
+    (focusableButtons[0] as HTMLButtonElement).focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowExitConfirm(false);
+        return;
+      }
+      if (e.key === "Tab") {
+        const first = focusableButtons[0];
+        const last = focusableButtons[focusableButtons.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [showExitConfirm]);
 
   // Memoize parsed JSON to avoid re-parsing on every render
   const phoneticNotes = useMemo(
@@ -75,6 +113,23 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
     [flow.addRecording]
   );
 
+  // Animated stage transition: fadeOut current, then switch
+  const goToStageAnimated = useCallback((stage: Parameters<typeof flow.goToStage>[0]) => {
+    setIsExiting(true);
+    setTimeout(() => {
+      flow.goToStage(stage);
+      setIsExiting(false);
+    }, 150);
+  }, [flow.goToStage]);
+
+  const nextStageAnimated = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => {
+      flow.nextStage();
+      setIsExiting(false);
+    }, 150);
+  }, [flow.nextStage]);
+
   const renderStage = () => {
     switch (flow.state.stage) {
       case 1:
@@ -84,7 +139,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
             translation={material.translation}
             phoneticNotes={phoneticNotes}
             isReview={isReview}
-            onComplete={() => flow.goToStage(2)}
+            onComplete={() => goToStageAnimated(2)}
           />
         );
 
@@ -93,7 +148,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
           <StageListening
             content={material.content}
             audioNormalSrc={audioNormalSrc}
-            onComplete={() => flow.goToStage(3)}
+            onComplete={() => goToStageAnimated(3)}
           />
         );
 
@@ -105,7 +160,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
             audioSlowSrc={audioSlowSrc}
             audioNormalSrc={audioNormalSrc}
             onRecording={handleAddRecording}
-            onComplete={() => flow.goToStage(4)}
+            onComplete={() => goToStageAnimated(4)}
           />
         );
 
@@ -118,7 +173,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
             audioNormalSrc={audioNormalSrc}
             onRecording={handleAddRecording}
             onLongSilence={() => flow.setHasLongSilence(true)}
-            onComplete={() => flow.goToStage(5)}
+            onComplete={() => goToStageAnimated(5)}
             onGoBackToRound2={flow.goBackToRound2}
             initialRound={flow.state.round}
           />
@@ -132,7 +187,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
             audioNormalSrc={audioNormalSrc}
             onRecording={handleAddRecording}
             onSelfRating={(rating) => flow.setSelfRating(rating)}
-            onComplete={() => flow.goToStage(6)}
+            onComplete={() => goToStageAnimated(6)}
           />
         );
 
@@ -141,7 +196,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
           <StageFreeExpression
             expressionPrompt={material.expression_prompt}
             onRecording={handleAddRecording}
-            onComplete={flow.nextStage}
+            onComplete={nextStageAnimated}
           />
         );
 
@@ -205,7 +260,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
 
       {/* Stage content with fade transition */}
       <div className="max-w-lg mx-auto px-4 py-6" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-        <div key={flow.state.stage} className="animate-fadeIn">
+        <div key={flow.state.stage} className={isExiting ? "animate-fade-out" : "animate-fadeIn"}>
           {renderStage()}
         </div>
       </div>
@@ -213,7 +268,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
       {/* Exit confirmation modal */}
       {showExitConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4" role="dialog" aria-modal="true" aria-labelledby="exit-dialog-title">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
+          <div ref={dialogRef} className="bg-white rounded-2xl p-6 max-w-sm w-full">
             <h3 id="exit-dialog-title" className="text-lg font-semibold text-gray-900 mb-2">退出练习？</h3>
             <p className="text-sm text-gray-500 mb-6">
               {flow.state.stage > 1

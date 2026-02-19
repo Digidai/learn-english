@@ -1,6 +1,34 @@
 import OpenAI from "openai";
 import { stripMarkdown } from "./preprocessor";
 
+// --- Retry helper for transient errors ---
+
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);
+const RETRY_DELAY_MS = 2000;
+
+async function fetchWithRetry(
+  input: RequestInfo,
+  init: RequestInit,
+  retries = 1
+): Promise<Response> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(input, init);
+      if (response.ok || !RETRYABLE_STATUSES.has(response.status)) {
+        return response;
+      }
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+    if (attempt < retries) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    }
+  }
+  throw lastError!;
+}
+
 // --- LLM Analysis ---
 
 export interface MaterialAnalysis {
@@ -106,13 +134,18 @@ export async function analyzeSentence(
 ): Promise<MaterialAnalysis> {
   const client = getClient(apiKey);
 
-  const response = await client.chat.completions.create({
-    model: "MiniMax-M2.5",
-    temperature: 0.3,
-    messages: [
-      {
-        role: "system",
-        content: `You are an English language learning assistant. Analyze the given English sentence for a Chinese learner. Use the analyze_sentence function to return structured analysis.
+  let response!: OpenAI.Chat.Completions.ChatCompletion;
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    try {
+      response = await client.chat.completions.create(
+        {
+          model: "MiniMax-M2.5",
+          temperature: 0.3,
+          messages: [
+            {
+              role: "system",
+              content: `You are an English language learning assistant. Analyze the given English sentence for a Chinese learner. Use the analyze_sentence function to return structured analysis.
 
 Rules for level assessment:
 - L1: High-frequency 1000 words, ≤5 words, simple statements/questions
@@ -126,23 +159,37 @@ Rules for word_mask:
 - Mask content words (nouns, main verbs, adjectives, adverbs)
 - Keep function words (a, the, in, on, and, but, I, you, is, was, etc.)
 - Target 40-60% of words masked`,
-      },
-      {
-        role: "user",
-        content: sentence,
-      },
-    ],
-    tools: [
-      {
-        type: "function",
-        function: ANALYSIS_FUNCTION,
-      },
-    ],
-    tool_choice: {
-      type: "function",
-      function: { name: "analyze_sentence" },
-    },
-  });
+            },
+            {
+              role: "user",
+              content: sentence,
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: ANALYSIS_FUNCTION,
+            },
+          ],
+          tool_choice: {
+            type: "function",
+            function: { name: "analyze_sentence" },
+          },
+        },
+        { signal: AbortSignal.timeout(15000) }
+      );
+      break;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // Retry on transient OpenAI SDK errors (status in error object)
+      const status = (err as { status?: number }).status;
+      if (attempt < 1 && status && RETRYABLE_STATUSES.has(status)) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      throw lastError;
+    }
+  }
 
   const toolCall = response.choices[0]?.message?.tool_calls?.[0] as
     | { type: "function"; function: { name: string; arguments: string } }
@@ -180,21 +227,25 @@ export async function generateTTS(
   text: string,
   speed: number
 ): Promise<TTSResult> {
-  const response = await fetch("https://api.minimax.io/v1/audio/synthesis", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "speech-02-turbo",
-      text,
-      voice_id: "English_FriendlyPerson",
-      speed,
-      output_format: "mp3",
-      sample_rate: 32000,
-    }),
-  });
+  const response = await fetchWithRetry(
+    "https://api.minimax.io/v1/audio/synthesis",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "speech-02-turbo",
+        text,
+        voice_id: "English_FriendlyPerson",
+        speed,
+        output_format: "mp3",
+        sample_rate: 32000,
+      }),
+      signal: AbortSignal.timeout(15000),
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -227,13 +278,18 @@ export async function preprocessMaterial(
   r2: R2Bucket
 ): Promise<void> {
   try {
-    // Mark as processing
-    await db
+    // CAS: only start processing if currently pending or failed
+    const cas = await db
       .prepare(
-        "UPDATE materials SET preprocess_status = 'processing' WHERE id = ?"
+        "UPDATE materials SET preprocess_status = 'processing' WHERE id = ? AND preprocess_status IN ('pending', 'failed')"
       )
       .bind(materialId)
       .run();
+
+    if (!cas.meta.changes) {
+      // Already being processed or done — skip
+      return;
+    }
 
     // Clean markdown/URLs from text for TTS and analysis
     const cleanText = stripMarkdown(sentence);

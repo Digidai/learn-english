@@ -8,6 +8,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [needsManualPlay, setNeedsManualPlay] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playCount, setPlayCount] = useState(0);
@@ -98,10 +99,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       await audioRef.current.play();
       setIsPlaying(true);
       setHasError(false);
+      setNeedsManualPlay(false);
       startProgressUpdates();
     } catch {
-      // Silently fail — iOS autoplay restrictions etc
-      setHasError(true);
+      // iOS autoplay restrictions — prompt user to tap to play
+      setNeedsManualPlay(true);
     }
   }, [startProgressUpdates]);
 
@@ -133,6 +135,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     isPlaying,
     isLoading,
     hasError,
+    needsManualPlay,
     currentTime,
     duration,
     playCount,

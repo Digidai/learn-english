@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Form, Link, redirect, useActionData, useNavigation } from "react-router";
 import {
   hashPassword,
@@ -36,27 +37,27 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   // Validation
   if (!username || !password) {
-    return { error: "请输入用户名和密码" };
+    return { error: "请输入用户名和密码", submittedUsername: username };
   }
 
   if (username.length < 2 || username.length > 20) {
-    return { error: "用户名长度需在 2-20 个字符之间" };
+    return { error: "用户名长度需在 2-20 个字符之间", submittedUsername: username };
   }
 
   if (!/^[a-zA-Z0-9_\u4e00-\u9fff]+$/.test(username)) {
-    return { error: "用户名只能包含字母、数字、下划线和中文" };
+    return { error: "用户名只能包含字母、数字、下划线和中文", submittedUsername: username };
   }
 
   if (password.length < 8) {
-    return { error: "密码长度不能少于 8 个字符" };
+    return { error: "密码长度不能少于 8 个字符", submittedUsername: username };
   }
 
   if (!/(?=.*[0-9!@#$%^&*])/.test(password)) {
-    return { error: "密码需包含至少一个数字或特殊字符" };
+    return { error: "密码需包含至少一个数字或特殊字符", submittedUsername: username };
   }
 
   if (password !== confirmPassword) {
-    return { error: "两次输入的密码不一致" };
+    return { error: "两次输入的密码不一致", submittedUsername: username };
   }
 
   // Check if username exists
@@ -67,7 +68,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     .first();
 
   if (existing) {
-    return { error: "该用户名已被注册" };
+    return { error: "该用户名已被注册", submittedUsername: username };
   }
 
   // Create user
@@ -94,6 +95,14 @@ export default function RegisterPage() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const [username, setUsername] = useState("");
+
+  // Restore username on validation error
+  useEffect(() => {
+    if (actionData?.error && actionData.submittedUsername) {
+      setUsername(actionData.submittedUsername);
+    }
+  }, [actionData]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -117,6 +126,8 @@ export default function RegisterPage() {
                 type="text"
                 required
                 autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="2-20 个字符"
               />

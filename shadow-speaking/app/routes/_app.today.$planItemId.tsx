@@ -1,4 +1,4 @@
-import { useNavigate, useLoaderData, useSubmit, redirect } from "react-router";
+import { useNavigate, useLoaderData, useSubmit, redirect, Link, useRouteError, isRouteErrorResponse } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { handlePracticeComplete } from "../../server/api/practice";
 import { PracticeFlow } from "~/components/practice/PracticeFlow";
@@ -148,6 +148,36 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   return redirect("/today");
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  return (
+    <div className="flex flex-col items-center justify-center py-12 px-4">
+      <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+        <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+        </svg>
+      </div>
+      <h2 className="text-lg font-semibold text-gray-900 mb-2">练习加载失败</h2>
+      <p className="text-sm text-gray-500 mb-4">请稍后再试</p>
+      {import.meta.env.DEV && (
+        <pre className="text-xs text-red-600 bg-red-50 rounded-lg p-3 mb-4 max-w-full overflow-auto">
+          {isRouteErrorResponse(error)
+            ? `${error.status} ${error.statusText}`
+            : error instanceof Error
+              ? error.message
+              : "Unknown error"}
+        </pre>
+      )}
+      <Link
+        to="/today"
+        className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+      >
+        返回今日计划
+      </Link>
+    </div>
+  );
 }
 
 interface PracticeMaterial {
