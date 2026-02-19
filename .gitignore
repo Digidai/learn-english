@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+*.tsbuildinfo
+.env
+.dev.vars*
+!.dev.vars.example
+!.env.example

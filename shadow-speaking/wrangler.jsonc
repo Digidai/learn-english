@@ -1,0 +1,40 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "shadow-speaking",
+	"compatibility_date": "2026-02-17",
+	"main": "./workers/app.ts",
+	"observability": {
+		"enabled": true
+	},
+	"compatibility_flags": ["nodejs_compat"],
+
+	// D1 Database
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "shadow-speaking-db",
+			"database_id": "placeholder-id"
+		}
+	],
+
+	// R2 Storage
+	"r2_buckets": [
+		{
+			"binding": "R2",
+			"bucket_name": "shadow-speaking-audio"
+		}
+	],
+
+	// KV Namespace (session storage)
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			"id": "placeholder-id"
+		}
+	],
+
+	// Cron Triggers
+	"triggers": {
+		"crons": ["0 20 * * *"]
+	}
+}

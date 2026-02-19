@@ -1,0 +1,152 @@
+import { useNavigate, useLoaderData, useSubmit, redirect } from "react-router";
+import { requireAuth } from "~/lib/auth.server";
+import { handlePracticeComplete } from "../../server/api/practice";
+import { PracticeFlow } from "~/components/practice/PracticeFlow";
+import type { Route } from "./+types/_app.today.$planItemId";
+
+export function meta() {
+  return [{ title: "练习 - Shadow Speaking" }];
+}
+
+export async function loader({ params, request, context }: Route.LoaderArgs) {
+  const env = context.cloudflare.env;
+  const user = await requireAuth(request, env);
+  const planItemId = params.planItemId;
+
+  // Get plan item and associated material with ownership check via JOIN
+  const planItem = await env.DB.prepare(
+    `SELECT pi.id as plan_item_id, pi.item_type, pi.status as item_status,
+            m.id as material_id, m.content, m.translation, m.level,
+            m.phonetic_notes, m.pause_marks, m.word_mask, m.expression_prompt,
+            m.audio_slow_key, m.audio_normal_key, m.audio_fast_key,
+            m.status, m.review_count
+     FROM plan_items pi
+     JOIN materials m ON pi.material_id = m.id
+     JOIN daily_plans dp ON pi.plan_id = dp.id
+     WHERE pi.id = ? AND dp.user_id = ?`
+  )
+    .bind(planItemId, user.id)
+    .first();
+
+  if (!planItem) {
+    throw redirect("/today");
+  }
+
+  return { material: planItem, planItemId };
+}
+
+export async function action({ request, context }: Route.ActionArgs) {
+  const env = context.cloudflare.env;
+  const user = await requireAuth(request, env);
+  const formData = await request.formData();
+
+  const materialId = String(formData.get("materialId"));
+  const planItemId = String(formData.get("planItemId"));
+  const selfRating = formData.get("selfRating") as string | null;
+  const isPoorPerformance = formData.get("isPoorPerformance") === "true";
+  const completedAllStages = formData.get("completedAllStages") !== "false";
+  const durationSeconds = Number(formData.get("durationSeconds") || 0);
+
+  // Validate ownership via JOIN (single query instead of two)
+  const valid = await env.DB.prepare(
+    `SELECT pi.id FROM plan_items pi
+     JOIN daily_plans dp ON pi.plan_id = dp.id
+     JOIN materials m ON pi.material_id = m.id
+     WHERE pi.id = ? AND dp.user_id = ? AND m.id = ? AND m.user_id = ?`
+  )
+    .bind(planItemId, user.id, materialId, user.id)
+    .first();
+
+  if (!valid) {
+    return redirect("/today");
+  }
+
+  // Use handlePracticeComplete which includes spaced repetition + streak updates
+  await handlePracticeComplete(
+    env.DB,
+    user.id,
+    materialId,
+    planItemId,
+    selfRating,
+    isPoorPerformance,
+    durationSeconds,
+    completedAllStages
+  );
+
+  // Upload recordings to R2 if present
+  const recordingEntries = formData.getAll("recordingKey");
+  const recordingBlobs = formData.getAll("recordingBlob");
+  for (let i = 0; i < recordingEntries.length; i++) {
+    const key = String(recordingEntries[i]);
+    const blob = recordingBlobs[i];
+    if (blob instanceof File && blob.size > 0) {
+      const r2Key = `recordings/${user.id}/${materialId}/${key}/${Date.now()}.webm`;
+      await env.R2.put(r2Key, blob.stream(), {
+        httpMetadata: { contentType: "audio/webm;codecs=opus" },
+      });
+    }
+  }
+
+  return redirect("/today");
+}
+
+interface PracticeMaterial {
+  plan_item_id: string;
+  material_id: string;
+  content: string;
+  translation: string | null;
+  level: number;
+  phonetic_notes: string | null;
+  pause_marks: string | null;
+  word_mask: string | null;
+  expression_prompt: string | null;
+  audio_slow_key: string | null;
+  audio_normal_key: string | null;
+  audio_fast_key: string | null;
+  status: string;
+  review_count: number;
+}
+
+export default function PracticeDetailPage() {
+  const { material, planItemId } = useLoaderData<typeof loader>();
+  const navigate = useNavigate();
+  const submit = useSubmit();
+
+  const m = material as unknown as PracticeMaterial;
+
+  const handleComplete = (data: {
+    selfRating: string | null;
+    isPoorPerformance: boolean;
+    durationSeconds: number;
+    completedAllStages: boolean;
+    recordings: Map<string, Blob>;
+  }) => {
+    const formData = new FormData();
+    formData.set("materialId", m.material_id);
+    formData.set("planItemId", planItemId);
+    formData.set("selfRating", data.selfRating || "");
+    formData.set("isPoorPerformance", String(data.isPoorPerformance));
+    formData.set("completedAllStages", String(data.completedAllStages));
+    formData.set("durationSeconds", String(data.durationSeconds));
+
+    // Attach recordings
+    data.recordings.forEach((blob, key) => {
+      formData.append("recordingKey", key);
+      formData.append("recordingBlob", blob, `${key}.webm`);
+    });
+
+    submit(formData, { method: "post", encType: "multipart/form-data" });
+  };
+
+  const handleExit = () => {
+    navigate("/today");
+  };
+
+  return (
+    <PracticeFlow
+      material={m as any}
+      onComplete={handleComplete}
+      onExit={handleExit}
+    />
+  );
+}
