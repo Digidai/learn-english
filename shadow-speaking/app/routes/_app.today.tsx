@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLoaderData, Form, useNavigation, useSearchParams } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { getTodayPlan } from "../../server/db/queries";
@@ -49,11 +50,14 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function TodayPage() {
-  const { plan, items } = useLoaderData<typeof loader>();
+  const { plan, items, user } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isRegenerating = navigation.state === "submitting";
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const notice = searchParams.get("notice");
+
+  const u = user as unknown as { streak_days: number; total_practice_days: number };
 
   const typedItems = items as Array<{
     id: string;
@@ -67,6 +71,7 @@ export default function TodayPage() {
   const totalCount = typedItems.length;
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
   const allDone = completedCount === totalCount && totalCount > 0;
+  const hasStartedItems = typedItems.some((i) => i.status !== "pending");
 
   if (!plan || items.length === 0) {
     return (
@@ -108,6 +113,11 @@ export default function TodayPage() {
           <p className="text-sm text-gray-400">
             {typedItems.filter((i) => i.item_type === "review").length} 条复习 · {typedItems.filter((i) => i.item_type === "new").length} 条新学
           </p>
+          {u.streak_days > 0 && (
+            <p className="text-sm text-orange-500 mt-3">
+              已连续练习 {u.streak_days} 天，继续保持！
+            </p>
+          )}
         </div>
       </div>
     );
@@ -130,18 +140,26 @@ export default function TodayPage() {
         </div>
       )}
 
+      {/* Streak header */}
+      {u.streak_days > 0 && (
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-orange-500 text-lg">🔥</span>
+          <span className="text-sm font-medium text-gray-700">
+            连续 {u.streak_days} 天
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold text-gray-900">今日练习</h1>
-        <Form method="post">
-          <input type="hidden" name="intent" value="regenerate" />
-          <button
-            type="submit"
-            disabled={isRegenerating}
-            className="text-sm text-blue-600 hover:text-blue-700 disabled:opacity-50"
-          >
-            刷新计划
-          </button>
-        </Form>
+        <button
+          type="button"
+          onClick={() => setShowRegenConfirm(true)}
+          disabled={isRegenerating}
+          className="text-sm text-blue-600 hover:text-blue-700 disabled:opacity-50"
+        >
+          刷新计划
+        </button>
       </div>
 
       {/* Progress bar */}
@@ -231,6 +249,37 @@ export default function TodayPage() {
           );
         })}
       </div>
+
+      {/* Regenerate confirmation modal */}
+      {showRegenConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">刷新计划？</h3>
+            <p className="text-sm text-gray-500 mb-6">
+              {hasStartedItems
+                ? "已有练习记录的项目不会丢失，但未开始的项目将被重新编排。"
+                : "当前计划将被替换为新的练习安排。"}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowRegenConfirm(false)}
+                className="flex-1 py-2.5 text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 font-medium"
+              >
+                取消
+              </button>
+              <Form method="post" className="flex-1" onSubmit={() => setShowRegenConfirm(false)}>
+                <input type="hidden" name="intent" value="regenerate" />
+                <button
+                  type="submit"
+                  className="w-full py-2.5 text-white bg-blue-600 rounded-xl hover:bg-blue-700 font-medium"
+                >
+                  确认刷新
+                </button>
+              </Form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

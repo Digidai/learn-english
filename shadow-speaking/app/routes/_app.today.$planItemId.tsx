@@ -81,41 +81,70 @@ export async function action({ request, context }: Route.ActionArgs) {
   // Upload recordings to R2 in parallel, then batch-insert DB rows
   const recordingEntries = formData.getAll("recordingKey");
   const recordingBlobs = formData.getAll("recordingBlob");
+  const recordingMimeTypes = formData.getAll("recordingMime");
 
   // Build upload tasks: parse key first, skip unparseable ones
-  const uploads: Array<{ key: string; blob: File; stage: number; round: number }> = [];
+  const uploads: Array<{ key: string; blob: File; stage: number; round: number; mime: string }> = [];
   for (let i = 0; i < recordingEntries.length; i++) {
     const key = String(recordingEntries[i]);
     const blob = recordingBlobs[i];
     if (!(blob instanceof File) || blob.size === 0) continue;
 
     // Parse key format: "stage4-round2-timestamp" → stage=4, round=2
-    const match = key.match(/^stage(\d+)-round(\d+)/);
-    if (!match) continue; // skip unparseable keys
-    uploads.push({ key, blob, stage: parseInt(match[1], 10), round: parseInt(match[2], 10) });
+    const match = key.match(/^stage(\d+)(?:-round(\d+))?/);
+    if (!match) continue;
+    const mime = String(recordingMimeTypes[i] || blob.type || "audio/webm;codecs=opus");
+    uploads.push({
+      key,
+      blob,
+      stage: parseInt(match[1], 10),
+      round: match[2] ? parseInt(match[2], 10) : 1,
+      mime,
+    });
   }
 
   if (uploads.length > 0) {
-    // R2 uploads in parallel
-    const r2Keys = await Promise.all(
-      uploads.map(async ({ key, blob }) => {
-        const r2Key = `recordings/${user.id}/${materialId}/${key}.webm`;
+    // Determine file extension from MIME type
+    const extFromMime = (mime: string) => {
+      if (mime.includes("mp4")) return "m4a";
+      if (mime.includes("webm")) return "webm";
+      return "webm";
+    };
+
+    // R2 uploads in parallel with allSettled (partial failure tolerance)
+    const results = await Promise.allSettled(
+      uploads.map(async ({ key, blob, mime }) => {
+        const ext = extFromMime(mime);
+        const r2Key = `recordings/${user.id}/${materialId}/${key}.${ext}`;
         await env.R2.put(r2Key, blob.stream(), {
-          httpMetadata: { contentType: "audio/webm;codecs=opus" },
+          httpMetadata: { contentType: mime },
         });
         return r2Key;
       })
     );
 
-    // Batch-insert DB rows
-    await env.DB.batch(
-      uploads.map(({ stage, round }, i) =>
-        env.DB.prepare(
-          `INSERT INTO recordings (id, practice_record_id, material_id, stage, round, r2_key, duration_ms)
-           VALUES (?, ?, ?, ?, ?, ?, 0)`
-        ).bind(crypto.randomUUID(), recordId, materialId, stage, round, r2Keys[i])
-      )
-    );
+    // Batch-insert DB rows only for successful uploads
+    const dbInserts: Array<{ stage: number; round: number; r2Key: string }> = [];
+    results.forEach((result, i) => {
+      if (result.status === "fulfilled") {
+        dbInserts.push({
+          stage: uploads[i].stage,
+          round: uploads[i].round,
+          r2Key: result.value,
+        });
+      }
+    });
+
+    if (dbInserts.length > 0) {
+      await env.DB.batch(
+        dbInserts.map(({ stage, round, r2Key }) =>
+          env.DB.prepare(
+            `INSERT INTO recordings (id, practice_record_id, material_id, stage, round, r2_key, duration_ms)
+             VALUES (?, ?, ?, ?, ?, ?, 0)`
+          ).bind(crypto.randomUUID(), recordId, materialId, stage, round, r2Key)
+        )
+      );
+    }
   }
 
   return redirect("/today");
@@ -161,10 +190,12 @@ export default function PracticeDetailPage() {
     formData.set("completedAllStages", String(data.completedAllStages));
     formData.set("durationSeconds", String(data.durationSeconds));
 
-    // Attach recordings
+    // Attach recordings with MIME type info
     data.recordings.forEach((blob, key) => {
+      const ext = blob.type.includes("mp4") ? "m4a" : "webm";
       formData.append("recordingKey", key);
-      formData.append("recordingBlob", blob, `${key}.webm`);
+      formData.append("recordingBlob", blob, `${key}.${ext}`);
+      formData.append("recordingMime", blob.type || "audio/webm;codecs=opus");
     });
 
     submit(formData, { method: "post", encType: "multipart/form-data" });

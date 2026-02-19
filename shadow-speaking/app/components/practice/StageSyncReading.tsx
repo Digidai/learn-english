@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { AudioPlayer } from "~/components/audio/AudioPlayer";
 import { AudioRecorder } from "~/components/audio/AudioRecorder";
 
@@ -11,6 +11,8 @@ interface Props {
   onComplete: () => void;
 }
 
+type Phase = "listen" | "record" | "review";
+
 export function StageSyncReading({
   content,
   pauseMarks,
@@ -22,7 +24,7 @@ export function StageSyncReading({
   const [round, setRound] = useState(1); // 1=slow, 2=normal
   const [roundsCompleted, setRoundsCompleted] = useState(0);
   const [extraRounds, setExtraRounds] = useState(0);
-  const [isRecordingPhase, setIsRecordingPhase] = useState(false);
+  const [phase, setPhase] = useState<Phase>("listen");
   const [silentWarning, setSilentWarning] = useState(false);
 
   const words = content.split(" ");
@@ -37,7 +39,14 @@ export function StageSyncReading({
   });
 
   const currentAudio = round === 1 ? audioSlowSrc : audioNormalSrc;
-  const roundLabel = round === 1 ? "第 1 遍 · 慢速" : `第 ${roundsCompleted >= 2 ? roundsCompleted + 1 : 2} 遍 · 常速`;
+  const roundLabel = round === 1
+    ? "第 1 遍 · 慢速"
+    : `第 ${roundsCompleted >= 2 ? roundsCompleted + 1 : 2} 遍 · 常速`;
+
+  const handleAudioEnded = useCallback(() => {
+    // Audio finished → switch to record phase
+    setPhase("record");
+  }, []);
 
   const handleRecordingComplete = (blob: Blob, durationMs: number) => {
     // Simple silence check: if duration is very short, might be silent
@@ -49,15 +58,20 @@ export function StageSyncReading({
     setSilentWarning(false);
     const key = `stage3-round${round}-${Date.now()}`;
     onRecording(key, blob);
-    setIsRecordingPhase(false);
 
     const newCompleted = roundsCompleted + 1;
     setRoundsCompleted(newCompleted);
+    setPhase("review");
 
     if (newCompleted === 1) {
-      // Move to normal speed
+      // Move to normal speed after first round
       setRound(2);
     }
+  };
+
+  const handleNextRound = () => {
+    setPhase("listen");
+    setSilentWarning(false);
   };
 
   const canComplete = roundsCompleted >= 2;
@@ -71,7 +85,11 @@ export function StageSyncReading({
         </span>
         <p className="text-sm text-gray-500 mb-1">{roundLabel}</p>
         <p className="text-xs text-gray-400">
-          看着文本，跟着音频一起朗读
+          {phase === "listen"
+            ? "先听一遍音频"
+            : phase === "record"
+            ? "现在跟着朗读"
+            : "录音完成"}
         </p>
       </div>
 
@@ -82,25 +100,44 @@ export function StageSyncReading({
         </p>
       </div>
 
-      {/* Audio player */}
-      <AudioPlayer
-        src={currentAudio}
-        label={round === 1 ? "慢速 0.75x" : "常速 1.0x"}
-        onEnded={() => setIsRecordingPhase(false)}
-      />
-
-      {/* Recording indicator */}
-      {isRecordingPhase && (
-        <div className="flex items-center justify-center gap-2 text-red-500">
-          <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-          <span className="text-sm font-medium">录音中</span>
-        </div>
+      {/* Listen phase: audio player */}
+      {phase === "listen" && (
+        <>
+          <AudioPlayer
+            src={currentAudio}
+            label={round === 1 ? "慢速 0.75x" : "常速 1.0x"}
+            onEnded={handleAudioEnded}
+            autoPlay
+          />
+          <div className="bg-blue-50 rounded-xl p-3">
+            <p className="text-xs text-blue-600 text-center">
+              先认真听一遍，听完后自动进入录音
+            </p>
+          </div>
+        </>
       )}
 
-      {/* Recorder */}
-      <AudioRecorder
-        onRecordingComplete={handleRecordingComplete}
-      />
+      {/* Record phase: recorder */}
+      {phase === "record" && (
+        <>
+          <div className="bg-amber-50 rounded-xl p-3">
+            <p className="text-xs text-amber-600 text-center">
+              看着文本，大声朗读出来
+            </p>
+          </div>
+          <AudioRecorder onRecordingComplete={handleRecordingComplete} />
+        </>
+      )}
+
+      {/* Review phase: show result */}
+      {phase === "review" && !canComplete && (
+        <button
+          onClick={handleNextRound}
+          className="w-full py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors"
+        >
+          下一遍
+        </button>
+      )}
 
       {silentWarning && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4">
@@ -110,9 +147,21 @@ export function StageSyncReading({
         </div>
       )}
 
-      {/* Progress and next */}
-      <div className="flex items-center justify-between text-sm text-gray-500">
-        <span>已完成 {roundsCompleted}/2 遍</span>
+      {/* Progress */}
+      <div className="flex items-center justify-center gap-2">
+        {[1, 2].map((r) => (
+          <div
+            key={r}
+            className={`w-2.5 h-2.5 rounded-full ${
+              r <= roundsCompleted
+                ? "bg-blue-600"
+                : r === roundsCompleted + 1
+                ? "bg-blue-300"
+                : "bg-gray-200"
+            }`}
+          />
+        ))}
+        <span className="text-xs text-gray-400 ml-1">{roundsCompleted}/2</span>
       </div>
 
       {canComplete && (
@@ -128,6 +177,7 @@ export function StageSyncReading({
               onClick={() => {
                 setExtraRounds((e) => e + 1);
                 setRound(2);
+                setPhase("listen");
               }}
               className="w-full py-2.5 text-blue-600 border border-blue-200 font-medium rounded-xl hover:bg-blue-50 transition-colors"
             >

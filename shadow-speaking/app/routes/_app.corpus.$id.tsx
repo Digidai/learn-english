@@ -49,7 +49,6 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     ).bind(params.id!, user.id).run();
 
     if (updated.meta.changes === 0) {
-      // Already retrying or not in failed state
       return { retryStarted: false };
     }
 
@@ -108,6 +107,8 @@ export default function CorpusDetailPage() {
     5: "脱稿复述",
     6: "自由表达",
   };
+
+  const audioBase = "/api/audio/";
 
   return (
     <div>
@@ -200,19 +201,41 @@ export default function CorpusDetailPage() {
         </div>
       </div>
 
-      {/* Audio playback */}
-      {m.audio_normal_key && (
+      {/* Audio playback — all 3 speeds */}
+      {(m.audio_slow_key || m.audio_normal_key || m.audio_fast_key) && (
         <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
           <p className="text-sm font-medium text-gray-500 mb-3">TTS 音频</p>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {m.audio_slow_key && (
-              <audio
-                src={`/api/audio/${encodeURIComponent(m.audio_slow_key)}`}
-                controls
-                className="w-full h-10"
-              />
+              <div>
+                <p className="text-xs text-gray-400 mb-1">慢速 0.75x</p>
+                <audio
+                  src={`${audioBase}${encodeURIComponent(m.audio_slow_key)}`}
+                  controls
+                  className="w-full h-10"
+                />
+              </div>
             )}
-            <p className="text-xs text-gray-400">慢速 / 常速 / 快速</p>
+            {m.audio_normal_key && (
+              <div>
+                <p className="text-xs text-gray-400 mb-1">常速 1.0x</p>
+                <audio
+                  src={`${audioBase}${encodeURIComponent(m.audio_normal_key)}`}
+                  controls
+                  className="w-full h-10"
+                />
+              </div>
+            )}
+            {m.audio_fast_key && (
+              <div>
+                <p className="text-xs text-gray-400 mb-1">快速 1.25x</p>
+                <audio
+                  src={`${audioBase}${encodeURIComponent(m.audio_fast_key)}`}
+                  controls
+                  className="w-full h-10"
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -237,7 +260,7 @@ export default function CorpusDetailPage() {
                   </p>
                 </div>
                 <audio
-                  src={`/api/audio/${encodeURIComponent(rec.r2_key)}`}
+                  src={`${audioBase}${encodeURIComponent(rec.r2_key)}`}
                   controls
                   className="h-8 w-40"
                 />
@@ -259,9 +282,9 @@ export default function CorpusDetailPage() {
 
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">确认删除</h3>
+            <h3 id="delete-dialog-title" className="text-lg font-semibold text-gray-900 mb-2">确认删除</h3>
             <p className="text-sm text-gray-500 mb-6">
               确定要删除这条语料吗？此操作不可撤销。
             </p>
@@ -269,6 +292,7 @@ export default function CorpusDetailPage() {
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 className="flex-1 py-2.5 text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 font-medium"
+                autoFocus
               >
                 取消
               </button>

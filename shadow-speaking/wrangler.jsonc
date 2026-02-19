@@ -13,7 +13,7 @@
 		{
 			"binding": "DB",
 			"database_name": "shadow-speaking-db",
-			"database_id": "placeholder-id"
+			"database_id": "0a375daf-3522-477c-a52b-4cd2e1196ebd"
 		}
 	],
 
@@ -29,7 +29,7 @@
 	"kv_namespaces": [
 		{
 			"binding": "KV",
-			"id": "placeholder-id"
+			"id": "f4fc726d95da46fbad9a3947605eedcd"
 		}
 	],
 

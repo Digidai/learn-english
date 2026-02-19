@@ -6,33 +6,44 @@ interface UseAudioPlayerOptions {
 
 export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playCount, setPlayCount] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const animFrameRef = useRef<number>(0);
-  const isPlayingRef = useRef(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const updateProgress = useCallback(() => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
-      if (isPlayingRef.current) {
-        animFrameRef.current = requestAnimationFrame(updateProgress);
-      }
+  // Use ref for onEnded to decouple Audio element lifecycle from callback identity
+  const onEndedRef = useRef(options.onEnded);
+  onEndedRef.current = options.onEnded;
+
+  const stopProgressUpdates = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
   }, []);
 
+  const startProgressUpdates = useCallback(() => {
+    stopProgressUpdates();
+    // Use setInterval at ~4fps instead of requestAnimationFrame at 60fps
+    intervalRef.current = setInterval(() => {
+      if (audioRef.current) {
+        setCurrentTime(audioRef.current.currentTime);
+      }
+    }, 250);
+  }, [stopProgressUpdates]);
+
   useEffect(() => {
     return () => {
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current);
-      }
+      stopProgressUpdates();
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
       }
     };
-  }, []);
+  }, [stopProgressUpdates]);
 
   const load = useCallback((src: string) => {
     // Clean up previous audio
@@ -41,59 +52,65 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       audioRef.current.removeAttribute("src");
       audioRef.current.load();
     }
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
+    stopProgressUpdates();
+
+    if (!src) {
+      setHasError(true);
+      return;
     }
+
+    setIsLoading(true);
+    setHasError(false);
 
     const audio = new Audio(src);
     audioRef.current = audio;
 
     audio.addEventListener("loadedmetadata", () => {
       setDuration(audio.duration);
+      setIsLoading(false);
+    });
+
+    audio.addEventListener("canplaythrough", () => {
+      setIsLoading(false);
     });
 
     audio.addEventListener("ended", () => {
-      isPlayingRef.current = false;
       setIsPlaying(false);
       setPlayCount((c) => c + 1);
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current);
-      }
-      options.onEnded?.();
+      stopProgressUpdates();
+      onEndedRef.current?.();
     });
 
     audio.addEventListener("error", () => {
-      isPlayingRef.current = false;
       setIsPlaying(false);
+      setIsLoading(false);
+      setHasError(true);
     });
 
-    isPlayingRef.current = false;
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
-  }, [options.onEnded]);
+  }, [stopProgressUpdates]);
 
   const play = useCallback(async () => {
     if (!audioRef.current) return;
     try {
       await audioRef.current.play();
-      isPlayingRef.current = true;
       setIsPlaying(true);
-      animFrameRef.current = requestAnimationFrame(updateProgress);
-    } catch (e) {
-      console.error("Audio play failed:", e);
+      setHasError(false);
+      startProgressUpdates();
+    } catch {
+      // Silently fail — iOS autoplay restrictions etc
+      setHasError(true);
     }
-  }, [updateProgress]);
+  }, [startProgressUpdates]);
 
   const pause = useCallback(() => {
     if (!audioRef.current) return;
     audioRef.current.pause();
-    isPlayingRef.current = false;
     setIsPlaying(false);
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-    }
-  }, []);
+    stopProgressUpdates();
+  }, [stopProgressUpdates]);
 
   const replay = useCallback(async () => {
     if (!audioRef.current) return;
@@ -114,6 +131,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
   return {
     isPlaying,
+    isLoading,
+    hasError,
     currentTime,
     duration,
     playCount,

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAudioRecorder } from "~/hooks/useAudioRecorder";
 
 interface AudioRecorderProps {
@@ -12,18 +13,25 @@ export function AudioRecorder({
   disabled,
 }: AudioRecorderProps) {
   const recorder = useAudioRecorder({ onStreamReady });
+  const [permError, setPermError] = useState(false);
 
   // Check MediaRecorder support
   const isSupported = typeof MediaRecorder !== "undefined";
 
   const handleToggle = async () => {
     if (recorder.isRecording) {
-      const blob = await recorder.stopRecording();
-      if (blob) {
-        onRecordingComplete(blob, recorder.durationMs);
+      const result = await recorder.stopRecording();
+      if (result) {
+        onRecordingComplete(result.blob, result.durationMs);
       }
     } else {
-      await recorder.startRecording();
+      try {
+        setPermError(false);
+        await recorder.startRecording();
+      } catch {
+        // Permission denied or other error — show message
+        setPermError(true);
+      }
     }
   };
 
@@ -39,11 +47,21 @@ export function AudioRecorder({
 
   return (
     <div className="flex flex-col items-center gap-3">
+      {/* Permission denied message */}
+      {(permError || recorder.permissionDenied) && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 w-full">
+          <p className="text-sm text-red-700 text-center">
+            需要麦克风权限才能录音。请在浏览器设置中允许麦克风访问。
+          </p>
+        </div>
+      )}
+
       {/* Record button */}
       <button
         onClick={handleToggle}
         disabled={disabled}
         aria-label={recorder.isRecording ? "停止录音" : "开始录音"}
+        aria-pressed={recorder.isRecording}
         className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
           recorder.isRecording
             ? "bg-red-500 hover:bg-red-600 animate-pulse"

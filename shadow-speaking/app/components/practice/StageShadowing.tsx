@@ -11,6 +11,8 @@ interface Props {
   onLongSilence: () => void;
   onComplete: () => void;
   onGoBackToRound2: () => void;
+  /** Initial round (default 1). Used when parent resets to round 2 via key prop. */
+  initialRound?: number;
 }
 
 export function StageShadowing({
@@ -21,9 +23,14 @@ export function StageShadowing({
   onLongSilence,
   onComplete,
   onGoBackToRound2,
+  initialRound = 1,
 }: Props) {
-  const [round, setRound] = useState(1); // 1, 2, 3
-  const [roundsCompleted, setRoundsCompleted] = useState<number[]>([]);
+  const [round, setRound] = useState(initialRound);
+  // Track which rounds are actually completed in THIS mount
+  const [roundsCompleted, setRoundsCompleted] = useState<number[]>(
+    // If starting from round 2 (goBackToRound2), assume round 1 was done
+    initialRound > 1 ? Array.from({ length: initialRound - 1 }, (_, i) => i + 1) : []
+  );
   const [showRetryPrompt, setShowRetryPrompt] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
   const silenceDetection = useSilenceDetection();

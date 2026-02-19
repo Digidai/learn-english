@@ -35,6 +35,12 @@ export function StageReproduction({
     onSelfRating(rating);
   };
 
+  const handleRetry = () => {
+    setHasRecorded(false);
+    setShowOriginal(false);
+    setSelectedRating(null);
+  };
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -104,12 +110,23 @@ export function StageReproduction({
           </div>
 
           {selectedRating && (
-            <button
-              onClick={onComplete}
-              className="w-full py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors"
-            >
-              继续
-            </button>
+            <div className="space-y-2">
+              <button
+                onClick={onComplete}
+                className="w-full py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors"
+              >
+                继续
+              </button>
+              {/* Allow retry for poor/fair ratings */}
+              {(selectedRating === "poor" || selectedRating === "fair") && (
+                <button
+                  onClick={handleRetry}
+                  className="w-full py-2.5 text-blue-600 border border-blue-200 font-medium rounded-xl hover:bg-blue-50 transition-colors"
+                >
+                  再试一次
+                </button>
+              )}
+            </div>
           )}
         </>
       )}

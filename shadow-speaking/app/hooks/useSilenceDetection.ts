@@ -38,6 +38,10 @@ export function useSilenceDetection(): UseSilenceDetectionResult {
     }
 
     const audioContext = new AudioContext();
+    // Resume context for iOS Safari where AudioContext starts suspended
+    if (audioContext.state === "suspended") {
+      audioContext.resume();
+    }
     const source = audioContext.createMediaStreamSource(stream);
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 256;

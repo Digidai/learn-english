@@ -1,16 +1,19 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 interface UseAudioRecorderOptions {
   onStreamReady?: (stream: MediaStream) => void;
 }
 
-interface UseAudioRecorderResult {
+export interface UseAudioRecorderResult {
   isRecording: boolean;
   recordingBlob: Blob | null;
   recordingUrl: string | null;
   durationMs: number;
+  /** The actual MIME type used by MediaRecorder (may be audio/mp4 on iOS) */
+  mimeType: string;
+  permissionDenied: boolean;
   startRecording: () => Promise<void>;
-  stopRecording: () => Promise<Blob | null>;
+  stopRecording: () => Promise<{ blob: Blob; durationMs: number } | null>;
   clearRecording: () => void;
 }
 
@@ -19,25 +22,45 @@ export function useAudioRecorder(options?: UseAudioRecorderOptions): UseAudioRec
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [durationMs, setDurationMs] = useState(0);
+  const [mimeType, setMimeType] = useState("audio/webm;codecs=opus");
+  const [permissionDenied, setPermissionDenied] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startTimeRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
+  // Cleanup on unmount — stop tracks if still recording
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+    };
+  }, []);
 
   const startRecording = useCallback(async () => {
     try {
+      setPermissionDenied(false);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      options?.onStreamReady?.(stream);
+      optionsRef.current?.onStreamReady?.(stream);
 
       // Choose the best available MIME type
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      const chosenMime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
         : "audio/mp4";
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      setMimeType(chosenMime);
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: chosenMime });
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -52,13 +75,16 @@ export function useAudioRecorder(options?: UseAudioRecorderOptions): UseAudioRec
       setIsRecording(true);
       setRecordingBlob(null);
       setRecordingUrl(null);
-    } catch (error) {
-      console.error("Failed to start recording:", error);
+    } catch (error: unknown) {
+      // Check for permission denial
+      if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "PermissionDeniedError")) {
+        setPermissionDenied(true);
+      }
       throw error;
     }
   }, []);
 
-  const stopRecording = useCallback((): Promise<Blob | null> => {
+  const stopRecording = useCallback((): Promise<{ blob: Blob; durationMs: number } | null> => {
     return new Promise((resolve) => {
       const recorder = mediaRecorderRef.current;
       if (!recorder || recorder.state === "inactive") {
@@ -80,7 +106,7 @@ export function useAudioRecorder(options?: UseAudioRecorderOptions): UseAudioRec
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
 
-        resolve(blob);
+        resolve({ blob, durationMs: elapsed });
       };
 
       recorder.stop();
@@ -101,6 +127,8 @@ export function useAudioRecorder(options?: UseAudioRecorderOptions): UseAudioRec
     recordingBlob,
     recordingUrl,
     durationMs,
+    mimeType,
+    permissionDenied,
     startRecording,
     stopRecording,
     clearRecording,

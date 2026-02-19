@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Form, useActionData, useNavigation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { isEnglish, splitSentences, checkDuplicates } from "../../server/services/preprocessor";
@@ -16,22 +17,22 @@ export async function action({ request, context }: Route.ActionArgs) {
   const text = String(formData.get("text") || "").trim();
 
   if (!text) {
-    return { error: "请输入英文内容", sentences: null };
+    return { error: "请输入英文内容", sentences: null, submittedText: text };
   }
 
   // Limit input length to prevent abuse
   if (text.length > 5000) {
-    return { error: "输入内容过长，请不要超过 5000 字符", sentences: null };
+    return { error: "输入内容过长，请不要超过 5000 字符", sentences: null, submittedText: text };
   }
 
   if (!isEnglish(text)) {
-    return { error: "请输入英文内容", sentences: null };
+    return { error: "请输入英文内容", sentences: null, submittedText: text };
   }
 
   // Split into sentences
   const sentences = splitSentences(text);
   if (sentences.length === 0) {
-    return { error: "未检测到有效句子", sentences: null };
+    return { error: "未检测到有效句子", sentences: null, submittedText: text };
   }
 
   // Check duplicates
@@ -42,6 +43,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       error: "所有句子已在语料库中",
       sentences: null,
       duplicates: duplicates.length,
+      submittedText: text,
     };
   }
 
@@ -84,6 +86,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     added: unique.length,
     duplicates: duplicates.length,
     sentences: unique,
+    submittedText: "",
   };
 }
 
@@ -91,6 +94,17 @@ export default function InputPage() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const [text, setText] = useState("");
+
+  // Restore text on error, clear on success
+  useEffect(() => {
+    if (!actionData) return;
+    if (actionData.error && actionData.submittedText) {
+      setText(actionData.submittedText);
+    } else if (actionData.success) {
+      setText("");
+    }
+  }, [actionData]);
 
   return (
     <div>
@@ -104,6 +118,8 @@ export default function InputPage() {
         <Form method="post">
           <textarea
             name="text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
             className="w-full h-40 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-gray-900 placeholder-gray-400"
             placeholder="Type or paste English text here..."
             disabled={isSubmitting}
@@ -112,7 +128,7 @@ export default function InputPage() {
           <div className="mt-4 flex justify-end">
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || text.trim().length === 0}
               className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isSubmitting ? "处理中..." : "添加"}

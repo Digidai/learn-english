@@ -1,4 +1,4 @@
-import { Form, useLoaderData } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
 import { requireAuth, type AuthUser } from "~/lib/auth.server";
 import { getUserMaterialStats } from "../../server/db/queries";
 import { LEVEL_LABELS, type Level } from "~/lib/constants";
@@ -36,6 +36,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   };
 }
 
+const DAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+
 export default function ProfilePage() {
   const { user, stats, practiceDates } = useLoaderData<typeof loader>();
   const u = user as unknown as AuthUser;
@@ -47,6 +49,16 @@ export default function ProfilePage() {
     byLevel: Record<number, { total: number; mastered: number }>;
   };
   const dates = practiceDates as unknown as string[];
+
+  // Compute calendar start day-of-week for alignment
+  const now = new Date();
+  const chinaMs = now.getTime() + 8 * 60 * 60 * 1000;
+  const todayChina = new Date(chinaMs);
+  // First day of calendar (29 days ago)
+  const startDate = new Date(chinaMs);
+  startDate.setUTCDate(todayChina.getUTCDate() - 29);
+  // Day of week for the start date (0=Sun, 6=Sat)
+  const startDow = startDate.getUTCDay();
 
   return (
     <div>
@@ -175,14 +187,21 @@ export default function ProfilePage() {
       {/* Practice calendar (last 30 days) */}
       <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-4">
         <h3 className="text-sm font-medium text-gray-500 mb-4">练习日历（近30天）</h3>
+        {/* Day-of-week labels */}
+        <div className="grid grid-cols-7 gap-1.5 mb-1">
+          {DAY_LABELS.map((label) => (
+            <span key={label} className="text-center text-xs text-gray-400">{label}</span>
+          ))}
+        </div>
         <div className="grid grid-cols-7 gap-1.5">
+          {/* Empty cells for alignment */}
+          {Array.from({ length: startDow }, (_, i) => (
+            <div key={`empty-${i}`} />
+          ))}
           {Array.from({ length: 30 }, (_, i) => {
-            // Use UTC+8 for date consistency with server
-            const now = new Date();
-            const chinaMs = now.getTime() + 8 * 60 * 60 * 1000;
-            const todayChina = new Date(chinaMs);
-            todayChina.setUTCDate(todayChina.getUTCDate() - 29 + i);
-            const dateStr = todayChina.toISOString().slice(0, 10);
+            const d = new Date(chinaMs);
+            d.setUTCDate(todayChina.getUTCDate() - 29 + i);
+            const dateStr = d.toISOString().slice(0, 10);
             const hasPractice = dates.includes(dateStr);
             const isToday = i === 29;
             return (
@@ -202,12 +221,12 @@ export default function ProfilePage() {
 
       {/* Settings & logout */}
       <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
-        <a href="/settings" className="flex items-center justify-between p-4">
+        <Link to="/settings" className="flex items-center justify-between p-4">
           <span className="text-gray-900">设置</span>
           <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
           </svg>
-        </a>
+        </Link>
         <Form method="post" action="/logout">
           <button type="submit" className="w-full flex items-center justify-between p-4 text-red-600 hover:bg-red-50 transition-colors rounded-b-2xl">
             <span>退出登录</span>
