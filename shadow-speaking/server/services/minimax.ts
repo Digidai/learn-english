@@ -237,8 +237,14 @@ export async function preprocessMaterial(
 
     // Clean markdown/URLs from text for TTS and analysis
     const cleanText = stripMarkdown(sentence);
-    if (cleanText.length < 2) {
-      throw new Error("Content too short after stripping markdown");
+    const wordCount = cleanText.split(/\s+/).filter(Boolean).length;
+    if (cleanText.length < 5 || wordCount < 3) {
+      // Not a valid sentence — mark as failed with reason, delete the material
+      await db
+        .prepare("DELETE FROM materials WHERE id = ?")
+        .bind(materialId)
+        .run();
+      return; // Skip silently — content was just a source label
     }
 
     // Also update stored content to cleaned version if different

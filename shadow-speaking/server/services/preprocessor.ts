@@ -1,25 +1,54 @@
 /**
  * Strip markdown formatting from text, producing clean English sentences.
- * Removes: [text](url) → text, **bold** → bold, ## headers, - bullets, etc.
+ * Handles both raw markdown and partially-cleaned content (e.g. source labels
+ * left over from [link](url) → "link" conversion).
  */
 export function stripMarkdown(text: string): string {
   let cleaned = text;
-  // Remove markdown links: [text](url) → text
+
+  // 1. Remove markdown links at the start entirely (source labels are useless)
+  //    e.g. "[linkedin](https://...)" → ""
+  cleaned = cleaned.replace(/^\s*\[([^\]]*)\]\([^)]*\)\s*/g, "");
+  // Remove remaining inline markdown links: [text](url) → text
   cleaned = cleaned.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-  // Remove standalone URLs
+
+  // 2. Remove standalone URLs anywhere
   cleaned = cleaned.replace(/https?:\/\/[^\s)]+/g, "");
-  // Remove markdown headers: ## Header → Header
-  cleaned = cleaned.replace(/^#{1,6}\s+/gm, "");
-  // Remove bold/italic markers: **text** → text, *text* → text
+
+  // 3. Remove markdown headers ANYWHERE (not just line-start; content is single-line)
+  cleaned = cleaned.replace(/#{1,6}\s+/g, "");
+
+  // 4. Remove bold/italic: **text** or *text* → text
   cleaned = cleaned.replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1");
-  // Remove leading bullet markers: - item → item
-  cleaned = cleaned.replace(/^\s*[-*+]\s+/gm, "");
-  // Remove inline code backticks
+
+  // 5. Remove inline code backticks
   cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
-  // Collapse multiple spaces and trim
+
+  // 6. Collapse whitespace
   cleaned = cleaned.replace(/\s+/g, " ").trim();
-  // Remove empty parentheses left over from URL removal
+
+  // 7. Remove empty parentheses left from URL removal
   cleaned = cleaned.replace(/\(\s*\)/g, "").trim();
+
+  // 8. Remove leading bullet/dash marker: "- item" → "item"
+  cleaned = cleaned.replace(/^\s*[-*+]\s+/, "").trim();
+
+  // 9. Remove leading source-label-like tokens (domain patterns with dots/hyphens)
+  //    e.g. "openjobs-ai", "openjobs-ai.gitbook", "the-vision-debugged.beehiiv"
+  cleaned = cleaned.replace(/^[a-z0-9]+(?:[-._][a-z0-9]+)+\s+/i, "").trim();
+
+  // 10. After removing source label, there might be another "## " or "- "
+  cleaned = cleaned.replace(/^#{1,6}\s+/, "").trim();
+  cleaned = cleaned.replace(/^\s*[-*+]\s+/, "").trim();
+
+  // 11. Handle single-word source labels without dots/hyphens
+  //     (e.g. "linkedin", "producthunt", "webcatalog")
+  //     Strip if all-lowercase word followed by uppercase word or "- "
+  cleaned = cleaned.replace(/^[a-z]{2,20}\s+(?=[A-Z])/, "").trim();
+  cleaned = cleaned.replace(/^[a-z]{2,20}\s+(?=[-*+]\s)/, "").trim();
+  // After removing the label, strip the "- " again
+  cleaned = cleaned.replace(/^\s*[-*+]\s+/, "").trim();
+
   return cleaned;
 }
 
