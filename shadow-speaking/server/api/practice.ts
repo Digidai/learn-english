@@ -1,4 +1,5 @@
 import { updateMaterialAfterPractice } from "../services/spaced-repetition";
+import { checkLevelProgression } from "../services/level-assessor";
 
 const VALID_RATINGS = ["good", "fair", "poor"] as const;
 
@@ -63,6 +64,23 @@ export async function handlePracticeComplete(
 
   // Update user streak
   await updateUserStreak(db, userId, today);
+
+  // Check level progression
+  const user = await db
+    .prepare("SELECT level FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ level: number }>();
+
+  if (user && user.level < 5) {
+    const { shouldUpgrade } = await checkLevelProgression(db, userId, user.level, today);
+    if (shouldUpgrade) {
+      // CAS: only upgrade if level hasn't changed since we read it (prevents double-upgrade on concurrent requests)
+      await db
+        .prepare("UPDATE users SET level = level + 1 WHERE id = ? AND level = ?")
+        .bind(userId, user.level)
+        .run();
+    }
+  }
 
   return recordId;
 }

@@ -2,14 +2,16 @@ import { useAudioRecorder } from "~/hooks/useAudioRecorder";
 
 interface AudioRecorderProps {
   onRecordingComplete: (blob: Blob, durationMs: number) => void;
+  onStreamReady?: (stream: MediaStream) => void;
   disabled?: boolean;
 }
 
 export function AudioRecorder({
   onRecordingComplete,
+  onStreamReady,
   disabled,
 }: AudioRecorderProps) {
-  const recorder = useAudioRecorder();
+  const recorder = useAudioRecorder({ onStreamReady });
 
   // Check MediaRecorder support
   const isSupported = typeof MediaRecorder !== "undefined";

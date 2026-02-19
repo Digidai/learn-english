@@ -51,12 +51,16 @@ export async function generateDailyPlan(
     .bind(user.id, planDate)
     .all<MaterialForPlan>();
 
-  const reviewItems = reviewMaterials.results;
+  // Cap reviews to guarantee at least 1 new material slot (when totalSlots > 1)
+  const reviewCap = totalSlots > 1
+    ? Math.min(reviewMaterials.results.length, totalSlots - 1, Math.ceil(totalSlots * 0.8))
+    : totalSlots;
+  const reviewItems = reviewMaterials.results.slice(0, reviewCap);
 
   // Step 2: Calculate new material slots, applying retirement protection
   let newSlots = Math.max(0, totalSlots - reviewItems.length);
   if (newSlots > 0) {
-    const { shouldReduceNew } = await checkRetirementProtection(db, user.id);
+    const { shouldReduceNew } = await checkRetirementProtection(db, user.id, planDate);
     if (shouldReduceNew) {
       newSlots = 0;
     }
@@ -141,8 +145,16 @@ export async function regenerateDailyPlan(
     .first<{ id: string; completed_items: number }>();
 
   if (existingPlan) {
-    if (existingPlan.completed_items > 0) {
-      // Don't regenerate if some items are already completed
+    // Check for any non-pending (in-progress or completed) items
+    const nonPending = await db
+      .prepare(
+        "SELECT COUNT(*) as count FROM plan_items WHERE plan_id = ? AND status != 'pending'"
+      )
+      .bind(existingPlan.id)
+      .first<{ count: number }>();
+
+    if (nonPending && nonPending.count > 0) {
+      // Don't regenerate if any items are in-progress or completed
       return null;
     }
 

@@ -1,4 +1,4 @@
-import { Link, useLoaderData, Form, useNavigation } from "react-router";
+import { Link, useLoaderData, Form, useNavigation, useSearchParams } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { getTodayPlan } from "../../server/db/queries";
 import { generateDailyPlan } from "../../server/services/plan-generator";
@@ -52,6 +52,8 @@ export default function TodayPage() {
   const { plan, items } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isRegenerating = navigation.state === "submitting";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const notice = searchParams.get("notice");
 
   const typedItems = items as Array<{
     id: string;
@@ -113,6 +115,21 @@ export default function TodayPage() {
 
   return (
     <div>
+      {/* Toast notice */}
+      {notice === "completed" && (
+        <div className="mb-4 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <span className="text-sm text-amber-700">该练习已完成，无需重复练习</span>
+          <button
+            onClick={() => setSearchParams({}, { replace: true })}
+            className="text-amber-500 hover:text-amber-700 ml-2"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold text-gray-900">今日练习</h1>
         <Form method="post">

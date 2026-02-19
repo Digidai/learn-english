@@ -23,8 +23,17 @@ export function calculateNextReview(
   nextReviewDate: string;
   newStatus: string;
 } {
-  // Poor performance: reset to beginning
+  // Poor performance handling
   if (practice.isPoorPerformance || practice.selfRating === "poor") {
+    if (practice.completedAllStages) {
+      // Completed all stages but performed poorly: halve review count, review in 1 day
+      return {
+        reviewCount: Math.max(1, Math.floor(material.review_count / 2)),
+        nextReviewDate: addDays(today, 1),
+        newStatus: "learning",
+      };
+    }
+    // Didn't complete all stages: full reset
     return {
       reviewCount: 0,
       nextReviewDate: addDays(today, 1),

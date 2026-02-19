@@ -1,5 +1,9 @@
 import { useState, useRef, useCallback } from "react";
 
+interface UseAudioRecorderOptions {
+  onStreamReady?: (stream: MediaStream) => void;
+}
+
 interface UseAudioRecorderResult {
   isRecording: boolean;
   recordingBlob: Blob | null;
@@ -10,7 +14,7 @@ interface UseAudioRecorderResult {
   clearRecording: () => void;
 }
 
-export function useAudioRecorder(): UseAudioRecorderResult {
+export function useAudioRecorder(options?: UseAudioRecorderOptions): UseAudioRecorderResult {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
@@ -25,6 +29,7 @@ export function useAudioRecorder(): UseAudioRecorderResult {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      options?.onStreamReady?.(stream);
 
       // Choose the best available MIME type
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")

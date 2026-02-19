@@ -13,14 +13,20 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const user = await requireAuth(request, env);
   const stats = await getUserMaterialStats(env.DB, user.id);
 
+  // Use UTC+8 (Beijing time) for consistent date handling
+  const now = new Date();
+  const chinaOffset = 8 * 60 * 60 * 1000;
+  const todayBeijing = new Date(now.getTime() + chinaOffset).toISOString().slice(0, 10);
+
   // Get recent practice calendar (last 30 days)
+  // created_at is UTC; convert to Beijing time (+8h) before extracting date
   const calendar = await env.DB.prepare(
-    `SELECT DISTINCT date(created_at) as practice_date
+    `SELECT DISTINCT date(created_at, '+8 hours') as practice_date
      FROM practice_records
-     WHERE user_id = ? AND created_at >= date('now', '-30 days')
+     WHERE user_id = ? AND date(created_at, '+8 hours') >= date(?, '-30 days')
      ORDER BY practice_date DESC`
   )
-    .bind(user.id)
+    .bind(user.id, todayBeijing)
     .all<{ practice_date: string }>();
 
   return {

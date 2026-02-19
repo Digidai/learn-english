@@ -89,6 +89,23 @@ export function usePracticeFlow(options: UsePracticeFlowOptions) {
     });
   }, [options]);
 
+  const exitEarly = useCallback(() => {
+    setState((prev) => {
+      const durationSeconds = Math.round((Date.now() - prev.startTime) / 1000);
+      // Early exit without completing all stages is inherently "poor":
+      // no selfRating available yet, so mark isPoorPerformance based on
+      // the fact that the user quit mid-flow
+      options.onComplete({
+        selfRating: prev.selfRating,
+        isPoorPerformance: true,
+        durationSeconds,
+        completedAllStages: false,
+        recordings: prev.recordings,
+      });
+      return prev;
+    });
+  }, [options]);
+
   const goBackToRound2 = useCallback(() => {
     setState((prev) => ({
       ...prev,
@@ -107,6 +124,7 @@ export function usePracticeFlow(options: UsePracticeFlowOptions) {
     setSelfRating,
     setHasLongSilence,
     nextStage,
+    exitEarly,
     goBackToRound2,
   };
 }

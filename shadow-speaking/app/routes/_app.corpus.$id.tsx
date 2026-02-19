@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLoaderData, Form, redirect, useNavigation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { getMaterial, getMaterialRecordings, deleteMaterial } from "../../server/db/queries";
+import { preprocessMaterial } from "../../server/services/minimax";
 import { LEVEL_LABELS, type Level } from "~/lib/constants";
 import type { Material, Recording } from "../../server/db/queries";
 import type { Route } from "./+types/_app.corpus.$id";
@@ -36,6 +37,33 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect("/corpus");
   }
 
+  if (intent === "retry") {
+    const material = await getMaterial(env.DB, params.id!);
+    if (!material || material.user_id !== user.id) {
+      return redirect("/corpus");
+    }
+
+    // CAS: only retry if currently failed (prevents concurrent retries)
+    const updated = await env.DB.prepare(
+      "UPDATE materials SET preprocess_status = 'pending' WHERE id = ? AND user_id = ? AND preprocess_status = 'failed'"
+    ).bind(params.id!, user.id).run();
+
+    if (updated.meta.changes === 0) {
+      // Already retrying or not in failed state
+      return { retryStarted: false };
+    }
+
+    // Re-trigger preprocessing via waitUntil
+    const apiKey = env.MINIMAX_API_KEY;
+    if (apiKey) {
+      context.cloudflare.ctx.waitUntil(
+        preprocessMaterial(apiKey, material.content, params.id!, user.id, env.DB, env.R2)
+      );
+    }
+
+    return { retryStarted: true };
+  }
+
   return null;
 }
 
@@ -51,7 +79,12 @@ function safeJsonParse<T>(json: string | null, fallback: T): T {
 export default function CorpusDetailPage() {
   const { material, recordings } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
-  const isDeleting = navigation.state === "submitting";
+  const isSubmitting = navigation.state === "submitting";
+  const submittingIntent = isSubmitting
+    ? new URLSearchParams(navigation.formData as any).get("intent")
+    : null;
+  const isDeleting = submittingIntent === "delete";
+  const isRetrying = submittingIntent === "retry";
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const m = material as unknown as Material;
@@ -109,6 +142,26 @@ export default function CorpusDetailPage() {
             </span>
           ))}
         </div>
+
+        {/* Preprocessing failed — retry button */}
+        {m.preprocess_status === "failed" && (
+          <Form method="post" className="mb-4">
+            <input type="hidden" name="intent" value="retry" />
+            <button
+              type="submit"
+              disabled={isRetrying}
+              className="w-full py-2.5 text-amber-700 border border-amber-300 rounded-xl hover:bg-amber-50 font-medium text-sm transition-colors disabled:opacity-50"
+            >
+              {isRetrying ? "处理中..." : "重新处理"}
+            </button>
+          </Form>
+        )}
+        {m.preprocess_status === "pending" && (
+          <div className="mb-4 flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+            <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm text-blue-600">正在处理中，请稍候...</span>
+          </div>
+        )}
 
         {/* Phonetic notes */}
         {phoneticNotes.length > 0 && (

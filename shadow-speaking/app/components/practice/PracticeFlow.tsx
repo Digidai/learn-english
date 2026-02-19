@@ -179,7 +179,9 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">退出练习？</h3>
             <p className="text-sm text-gray-500 mb-6">
-              当前进度不会保存，下次需要重新开始这条练习。
+              {flow.state.stage > 1
+                ? "已完成的阶段进度将被保存。"
+                : "当前进度不会保存，下次需要重新开始这条练习。"}
             </p>
             <div className="flex gap-3">
               <button
@@ -189,7 +191,13 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
                 继续练习
               </button>
               <button
-                onClick={onExit}
+                onClick={() => {
+                  if (flow.state.stage > 1) {
+                    flow.exitEarly();
+                  } else {
+                    onExit();
+                  }
+                }}
                 className="flex-1 py-2.5 text-red-600 border border-red-200 rounded-xl hover:bg-red-50 font-medium"
               >
                 退出

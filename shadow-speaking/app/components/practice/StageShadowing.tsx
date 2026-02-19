@@ -1,6 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { AudioPlayer } from "~/components/audio/AudioPlayer";
 import { AudioRecorder } from "~/components/audio/AudioRecorder";
+import { useSilenceDetection } from "~/hooks/useSilenceDetection";
 
 interface Props {
   content: string;
@@ -25,6 +26,9 @@ export function StageShadowing({
   const [roundsCompleted, setRoundsCompleted] = useState<number[]>([]);
   const [showRetryPrompt, setShowRetryPrompt] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const silenceDetection = useSilenceDetection();
+  const silenceRef = useRef(silenceDetection);
+  silenceRef.current = silenceDetection;
 
   const words = content.split(" ");
 
@@ -91,19 +95,26 @@ export function StageShadowing({
     }
   };
 
+  const handleStreamReady = useCallback((stream: MediaStream) => {
+    silenceRef.current.startMonitoring(stream);
+  }, []);
+
   const handleRecordingComplete = (blob: Blob) => {
     const key = `stage4-round${round}-${Date.now()}`;
     onRecording(key, blob);
 
-    // For round 3, simulate long silence detection
-    // In production, this would use the silence detection hook
+    // Stop silence monitoring and check result
+    const result = silenceDetection.stopMonitoring();
+
     const newCompleted = [...roundsCompleted, round];
     setRoundsCompleted(newCompleted);
     setShowOriginal(true);
 
-    if (round === 3) {
-      // Check if we should offer retry
-      // This would normally come from silence detection
+    if (result.hasLongSilence) {
+      onLongSilence();
+      if (round === 3) {
+        setShowRetryPrompt(true);
+      }
     }
   };
 
@@ -163,6 +174,7 @@ export function StageShadowing({
       {/* Recorder */}
       <AudioRecorder
         onRecordingComplete={handleRecordingComplete}
+        onStreamReady={handleStreamReady}
       />
 
       {/* Show original text after recording */}

@@ -32,6 +32,11 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     throw redirect("/today");
   }
 
+  // Block re-practice of completed items
+  if ((planItem as Record<string, unknown>).item_status === "completed") {
+    throw redirect("/today?notice=completed");
+  }
+
   return { material: planItem, planItemId };
 }
 
@@ -62,7 +67,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   // Use handlePracticeComplete which includes spaced repetition + streak updates
-  await handlePracticeComplete(
+  const recordId = await handlePracticeComplete(
     env.DB,
     user.id,
     materialId,
@@ -73,18 +78,44 @@ export async function action({ request, context }: Route.ActionArgs) {
     completedAllStages
   );
 
-  // Upload recordings to R2 if present
+  // Upload recordings to R2 in parallel, then batch-insert DB rows
   const recordingEntries = formData.getAll("recordingKey");
   const recordingBlobs = formData.getAll("recordingBlob");
+
+  // Build upload tasks: parse key first, skip unparseable ones
+  const uploads: Array<{ key: string; blob: File; stage: number; round: number }> = [];
   for (let i = 0; i < recordingEntries.length; i++) {
     const key = String(recordingEntries[i]);
     const blob = recordingBlobs[i];
-    if (blob instanceof File && blob.size > 0) {
-      const r2Key = `recordings/${user.id}/${materialId}/${key}/${Date.now()}.webm`;
-      await env.R2.put(r2Key, blob.stream(), {
-        httpMetadata: { contentType: "audio/webm;codecs=opus" },
-      });
-    }
+    if (!(blob instanceof File) || blob.size === 0) continue;
+
+    // Parse key format: "stage4-round2-timestamp" → stage=4, round=2
+    const match = key.match(/^stage(\d+)-round(\d+)/);
+    if (!match) continue; // skip unparseable keys
+    uploads.push({ key, blob, stage: parseInt(match[1], 10), round: parseInt(match[2], 10) });
+  }
+
+  if (uploads.length > 0) {
+    // R2 uploads in parallel
+    const r2Keys = await Promise.all(
+      uploads.map(async ({ key, blob }) => {
+        const r2Key = `recordings/${user.id}/${materialId}/${key}.webm`;
+        await env.R2.put(r2Key, blob.stream(), {
+          httpMetadata: { contentType: "audio/webm;codecs=opus" },
+        });
+        return r2Key;
+      })
+    );
+
+    // Batch-insert DB rows
+    await env.DB.batch(
+      uploads.map(({ stage, round }, i) =>
+        env.DB.prepare(
+          `INSERT INTO recordings (id, practice_record_id, material_id, stage, round, r2_key, duration_ms)
+           VALUES (?, ?, ?, ?, ?, ?, 0)`
+        ).bind(crypto.randomUUID(), recordId, materialId, stage, round, r2Keys[i])
+      )
+    );
   }
 
   return redirect("/today");
@@ -112,7 +143,8 @@ export default function PracticeDetailPage() {
   const navigate = useNavigate();
   const submit = useSubmit();
 
-  const m = material as unknown as PracticeMaterial;
+  const raw = material as unknown as PracticeMaterial;
+  const m = { ...raw, id: raw.material_id };
 
   const handleComplete = (data: {
     selfRating: string | null;
@@ -144,7 +176,7 @@ export default function PracticeDetailPage() {
 
   return (
     <PracticeFlow
-      material={m as any}
+      material={m}
       onComplete={handleComplete}
       onExit={handleExit}
     />

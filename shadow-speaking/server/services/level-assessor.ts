@@ -1,7 +1,8 @@
 export async function checkLevelProgression(
   db: D1Database,
   userId: string,
-  currentLevel: number
+  currentLevel: number,
+  today: string
 ): Promise<{ shouldUpgrade: boolean; inObservation: boolean }> {
   if (currentLevel >= 5) {
     return { shouldUpgrade: false, inObservation: false };
@@ -24,10 +25,10 @@ export async function checkLevelProgression(
     .prepare(
       `SELECT plan_date, completed_items, total_items
        FROM daily_plans
-       WHERE user_id = ? AND plan_date >= date('now', '-7 days')
+       WHERE user_id = ? AND plan_date >= date(?, '-7 days')
        ORDER BY plan_date DESC`
     )
-    .bind(userId)
+    .bind(userId, today)
     .all<{ plan_date: string; completed_items: number; total_items: number }>();
 
   if (recentPlans.results.length < 3) {
@@ -49,17 +50,18 @@ export async function checkLevelProgression(
 
 export async function checkRetirementProtection(
   db: D1Database,
-  userId: string
+  userId: string,
+  today: string
 ): Promise<{ shouldReduceNew: boolean }> {
   // Check if last 3 days completion rate < 50%
   const recentPlans = await db
     .prepare(
       `SELECT completed_items, total_items
        FROM daily_plans
-       WHERE user_id = ? AND plan_date >= date('now', '-3 days')
+       WHERE user_id = ? AND plan_date >= date(?, '-3 days')
        ORDER BY plan_date DESC`
     )
-    .bind(userId)
+    .bind(userId, today)
     .all<{ completed_items: number; total_items: number }>();
 
   if (recentPlans.results.length < 3) {
