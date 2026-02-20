@@ -157,13 +157,20 @@ export async function handlePracticeComplete(
       if (normalizedOperationId && isUniqueOperationConstraintError(error)) {
         const existing = await db
           .prepare(
-            "SELECT id FROM practice_records WHERE user_id = ? AND operation_id = ?"
+            "SELECT id, material_id, plan_item_id FROM practice_records WHERE user_id = ? AND operation_id = ?"
           )
           .bind(userId, normalizedOperationId)
-          .first<{ id: string }>();
-        if (existing) {
+          .first<{ id: string; material_id: string; plan_item_id: string | null }>();
+        if (
+          existing &&
+          existing.material_id === materialId &&
+          (existing.plan_item_id || null) === planItemId
+        ) {
           return { accepted: true, recordId: existing.id };
         }
+        throw new Error(
+          `operation_id already used for another practice record: ${normalizedOperationId}`
+        );
       }
       throw error;
     }
