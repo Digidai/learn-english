@@ -1,5 +1,6 @@
 import { generateDailyPlan } from "../services/plan-generator";
 import { preprocessMaterial } from "../services/minimax";
+import { checkPracticeDataIntegrity } from "../services/data-integrity";
 
 const CONCURRENCY_LIMIT = 10;
 let hasPreprocessJobsTable = false;
@@ -102,4 +103,48 @@ export async function handleDailyPlanCron(env: Env): Promise<void> {
   }
 
   console.log(`[Cron] Plans generated: ${generated}, skipped: ${skipped}`);
+
+  // Run a lightweight integrity audit after cron work
+  try {
+    const issues = await checkPracticeDataIntegrity(env.DB, 15);
+    if (issues.length === 0) {
+      console.log(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          scope: "integrity",
+          event: "practice_audit_passed",
+          severity: "info",
+        })
+      );
+      return;
+    }
+
+    for (const issue of issues) {
+      const payload = {
+        ts: new Date().toISOString(),
+        scope: "integrity",
+        event: "practice_audit_issue",
+        code: issue.code,
+        severity: issue.severity,
+        count: issue.count,
+        message: issue.message,
+        samples: issue.samples,
+      };
+      if (issue.severity === "error") {
+        console.error(JSON.stringify(payload));
+      } else {
+        console.warn(JSON.stringify(payload));
+      }
+    }
+  } catch (auditError) {
+    console.error(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        scope: "integrity",
+        event: "practice_audit_failed",
+        severity: "error",
+        error: auditError instanceof Error ? auditError.message : String(auditError),
+      })
+    );
+  }
 }

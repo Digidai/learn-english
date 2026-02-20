@@ -68,7 +68,9 @@ shadow-speaking/
 │   │   ├── _app.corpus.$id.tsx    # Corpus detail / 语料详情
 │   │   ├── _app.profile.tsx       # User profile / 个人中心
 │   │   ├── _app.settings.tsx      # Settings / 设置
-│   │   └── api.audio.tsx          # Audio streaming API
+│   │   ├── api.audio.tsx          # Audio streaming API
+│   │   ├── api.retry-preprocess.tsx # Admin API: retry preprocess
+│   │   └── api.integrity-check.tsx  # Admin API: integrity audit
 │   ├── components/
 │   │   ├── practice/              # 6 stage components + PracticeFlow controller
 │   │   └── audio/                 # AudioPlayer + AudioRecorder
@@ -84,6 +86,7 @@ shadow-speaking/
 │   │   ├── spaced-repetition.ts   # Review scheduling algorithm
 │   │   ├── plan-generator.ts      # Daily plan generation
 │   │   ├── level-assessor.ts      # Level progression logic
+│   │   ├── data-integrity.ts      # Practice data integrity audit
 │   │   └── cold-start.ts          # Cold start sentence packs
 │   ├── db/
 │   │   ├── schema.sql             # D1 database schema (6 tables)
@@ -176,8 +179,8 @@ wrangler d1 execute shadow-speaking-db --local --file=server/db/schema.sql
 wrangler secret put MINIMAX_API_KEY
 # Enter your API key when prompted / 按提示输入 API 密钥
 
-# Set admin whitelist for retry-preprocess API (comma-separated usernames)
-# 设置 retry-preprocess 接口管理员白名单（逗号分隔的用户名）
+# Set admin whitelist for admin APIs (comma-separated usernames)
+# 设置管理员接口白名单（逗号分隔的用户名）
 wrangler secret put RETRY_PREPROCESS_ADMIN_USERS
 # Example input: dai,alice,bob
 # 示例输入：dai,alice,bob
@@ -222,6 +225,18 @@ The cron trigger runs at **UTC 20:00 daily** (Beijing 04:00) to generate daily p
 - 接口：`POST /api/retry-preprocess`
 - 鉴权：必须先登录，且用户名在 `RETRY_PREPROCESS_ADMIN_USERS` 白名单内
 - 范围：单次最多重试 30 条 `preprocess_status = 'pending'` 的语料（会先把 `failed` 重置为 `pending`）
+
+### 10. Admin API: Integrity Check / 管理员接口：数据一致性巡检
+
+- Endpoint: `POST /api/integrity-check`
+- Auth: must be logged in and username must be in `RETRY_PREPROCESS_ADMIN_USERS`
+- Scope: returns integrity issues for practice-related tables (`daily_plans`, `plan_items`, `practice_records`), including duplicate `operation_id`
+- Output: `{ checkedAt, issueCount, issues }`
+
+- 接口：`POST /api/integrity-check`
+- 鉴权：必须先登录，且用户名在 `RETRY_PREPROCESS_ADMIN_USERS` 白名单内
+- 范围：巡检练习相关表（`daily_plans`、`plan_items`、`practice_records`）的一致性问题，包含重复 `operation_id`
+- 输出：`{ checkedAt, issueCount, issues }`
 
 ---
 
@@ -273,6 +288,7 @@ User Browser
     +-- Cron (UTC 20:00)
         +-- Generate daily plans (UTC+8 date)
         +-- Recover stale preprocess jobs
+        +-- Run practice data integrity audit
 ```
 
 ---
