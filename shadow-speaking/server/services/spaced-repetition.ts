@@ -135,9 +135,9 @@ export async function updateMaterialAfterPractice(
     }
   }
 
-  console.warn(
-    `[SpacedRepetition] CAS update failed after retries for material ${materialId}`
-  );
+  const message = `[SpacedRepetition] CAS update failed after retries for material ${materialId}`;
+  console.error(message);
+  throw new Error(message);
 }
 
 function addDays(dateStr: string, days: number): string {

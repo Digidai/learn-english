@@ -147,6 +147,8 @@ export async function handlePracticeComplete(
   } catch (error) {
     // Best-effort compensation: avoid locking plan item in completed state on partial failures
     try {
+      let didRollbackPlanItem = !planItemId;
+
       if (planItemId && planId && previousPlanItemStatus) {
         const rollbackItemResult = await db
           .prepare(
@@ -154,9 +156,10 @@ export async function handlePracticeComplete(
           )
           .bind(previousPlanItemStatus, planItemId)
           .run();
+        didRollbackPlanItem = rollbackItemResult.meta.changes > 0;
 
         // Only decrement plan counters if we actually rolled the item state back.
-        if (didIncrementPlanCount && rollbackItemResult.meta.changes > 0) {
+        if (didIncrementPlanCount && didRollbackPlanItem) {
           await db
             .prepare(
               "UPDATE daily_plans SET completed_items = CASE WHEN completed_items > 0 THEN completed_items - 1 ELSE 0 END WHERE id = ?"
@@ -166,16 +169,31 @@ export async function handlePracticeComplete(
         }
       }
 
-      if (recordId) {
+      // Keep practice record when item rollback fails, to avoid "completed item with no record".
+      if (recordId && didRollbackPlanItem) {
         await db
           .prepare("DELETE FROM practice_records WHERE id = ?")
           .bind(recordId)
           .run();
+      } else if (recordId && !didRollbackPlanItem) {
+        console.error(
+          "[Practice] Skip deleting practice record because plan item rollback failed",
+          { recordId, planItemId, planId }
+        );
       }
     } catch (compensationError) {
       console.error("[Practice] Compensation failed:", compensationError);
     }
 
+    console.error("[Practice] Completion failed", {
+      userId,
+      materialId,
+      planItemId,
+      planId,
+      recordId,
+      didIncrementPlanCount,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw error;
   }
 }
