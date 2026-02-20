@@ -2,6 +2,38 @@ import { updateMaterialAfterPractice } from "../services/spaced-repetition";
 import { checkLevelProgression } from "../services/level-assessor";
 
 const VALID_RATINGS = ["good", "fair", "poor"] as const;
+let hasEnsuredPracticeOperationSchema = false;
+
+function isUniqueOperationConstraintError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.includes("UNIQUE constraint failed") &&
+    error.message.includes("practice_records.user_id")
+  );
+}
+
+async function ensurePracticeOperationSchema(db: D1Database): Promise<void> {
+  if (hasEnsuredPracticeOperationSchema) return;
+
+  try {
+    await db.exec("ALTER TABLE practice_records ADD COLUMN operation_id TEXT");
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes("duplicate column name")
+    ) {
+      throw error;
+    }
+  }
+
+  await db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_records_user_operation_id
+     ON practice_records(user_id, operation_id)
+     WHERE operation_id IS NOT NULL`
+  );
+
+  hasEnsuredPracticeOperationSchema = true;
+}
 
 interface PracticeCompleteResult {
   accepted: boolean;
@@ -17,7 +49,8 @@ export async function handlePracticeComplete(
   selfRating: string | null,
   isPoorPerformance: boolean,
   durationSeconds: number,
-  completedAllStages: boolean = true
+  completedAllStages: boolean = true,
+  operationId: string | null = null
 ): Promise<PracticeCompleteResult> {
   // Validate selfRating
   if (selfRating && !VALID_RATINGS.includes(selfRating as any)) {
@@ -28,6 +61,7 @@ export async function handlePracticeComplete(
   const now = new Date();
   const chinaOffset = 8 * 60 * 60 * 1000;
   const today = new Date(now.getTime() + chinaOffset).toISOString().slice(0, 10);
+  const normalizedOperationId = operationId?.trim() || null;
 
   let planId: string | null = null;
   let previousPlanItemStatus: "pending" | "in_progress" | null = null;
@@ -35,6 +69,25 @@ export async function handlePracticeComplete(
   let didIncrementPlanCount = false;
 
   try {
+    await ensurePracticeOperationSchema(db);
+
+    // Idempotency: replay of same operation returns existing record.
+    if (normalizedOperationId) {
+      const existing = await db
+        .prepare(
+          `SELECT id FROM practice_records
+           WHERE user_id = ?
+             AND material_id = ?
+             AND ifnull(plan_item_id, '') = ifnull(?, '')
+             AND operation_id = ?`
+        )
+        .bind(userId, materialId, planItemId, normalizedOperationId)
+        .first<{ id: string }>();
+      if (existing) {
+        return { accepted: true, recordId: existing.id };
+      }
+    }
+
     // CAS: only first completion of a plan item is accepted
     if (planItemId) {
       const planItem = await db
@@ -81,23 +134,39 @@ export async function handlePracticeComplete(
     }
 
     recordId = crypto.randomUUID();
-    await db
-      .prepare(
-        `INSERT INTO practice_records
-         (id, user_id, material_id, plan_item_id, completed_all_stages, self_rating, is_poor_performance, duration_seconds)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        recordId,
-        userId,
-        materialId,
-        planItemId,
-        completedAllStages ? 1 : 0,
-        selfRating,
-        isPoorPerformance ? 1 : 0,
-        durationSeconds
-      )
-      .run();
+    try {
+      await db
+        .prepare(
+          `INSERT INTO practice_records
+           (id, user_id, material_id, plan_item_id, completed_all_stages, self_rating, is_poor_performance, duration_seconds, operation_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          recordId,
+          userId,
+          materialId,
+          planItemId,
+          completedAllStages ? 1 : 0,
+          selfRating,
+          isPoorPerformance ? 1 : 0,
+          durationSeconds,
+          normalizedOperationId
+        )
+        .run();
+    } catch (error) {
+      if (normalizedOperationId && isUniqueOperationConstraintError(error)) {
+        const existing = await db
+          .prepare(
+            "SELECT id FROM practice_records WHERE user_id = ? AND operation_id = ?"
+          )
+          .bind(userId, normalizedOperationId)
+          .first<{ id: string }>();
+        if (existing) {
+          return { accepted: true, recordId: existing.id };
+        }
+      }
+      throw error;
+    }
 
     // Core learning state update (critical)
     await updateMaterialAfterPractice(
@@ -189,6 +258,7 @@ export async function handlePracticeComplete(
       userId,
       materialId,
       planItemId,
+      operationId: normalizedOperationId,
       planId,
       recordId,
       didIncrementPlanCount,

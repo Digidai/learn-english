@@ -8,6 +8,7 @@ import {
   useRouteError,
   isRouteErrorResponse,
 } from "react-router";
+import { useRef } from "react";
 import { requireAuth } from "~/lib/auth.server";
 import { handlePracticeComplete } from "../../server/api/practice";
 import { PracticeFlow } from "~/components/practice/PracticeFlow";
@@ -81,6 +82,13 @@ export async function action({ request, context }: Route.ActionArgs) {
     const selfRating = formData.get("selfRating") as string | null;
     const isPoorPerformance = formData.get("isPoorPerformance") === "true";
     const completedAllStages = formData.get("completedAllStages") !== "false";
+    const rawOperationId = formData.get("operationId");
+    const operationId = typeof rawOperationId === "string" && rawOperationId.trim()
+      ? rawOperationId.trim()
+      : null;
+    if (operationId && operationId.length > 128) {
+      return Response.json({ ok: false, error: "请求参数无效，请重试。" }, { status: 400 });
+    }
     const rawDuration = Number(formData.get("durationSeconds") || 0);
     const durationSeconds = Number.isFinite(rawDuration) && rawDuration > 0
       ? Math.floor(rawDuration)
@@ -113,7 +121,8 @@ export async function action({ request, context }: Route.ActionArgs) {
       selfRating,
       isPoorPerformance,
       durationSeconds,
-      completedAllStages
+      completedAllStages,
+      operationId
     );
 
     if (!completeResult.accepted || !completeResult.recordId) {
@@ -256,6 +265,7 @@ export default function PracticeDetailPage() {
     | undefined;
   const navigate = useNavigate();
   const submit = useSubmit();
+  const operationIdRef = useRef<string | null>(null);
 
   const raw = material as unknown as PracticeMaterial;
   const m = { ...raw, id: raw.material_id };
@@ -267,9 +277,13 @@ export default function PracticeDetailPage() {
     completedAllStages: boolean;
     recordings: Map<string, Blob>;
   }) => {
+    if (!operationIdRef.current) {
+      operationIdRef.current = crypto.randomUUID();
+    }
     const formData = new FormData();
     formData.set("materialId", m.material_id);
     formData.set("planItemId", planItemId);
+    formData.set("operationId", operationIdRef.current);
     formData.set("selfRating", data.selfRating || "");
     formData.set("isPoorPerformance", String(data.isPoorPerformance));
     formData.set("completedAllStages", String(data.completedAllStages));

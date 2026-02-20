@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS practice_records (
   user_id TEXT NOT NULL,
   material_id TEXT NOT NULL,
   plan_item_id TEXT,
+  operation_id TEXT,
   completed_all_stages INTEGER NOT NULL DEFAULT 0,
   self_rating TEXT,
   is_poor_performance INTEGER NOT NULL DEFAULT 0,
@@ -127,4 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_recordings_material ON recordings(material_id, cr
 CREATE INDEX IF NOT EXISTS idx_plan_items_plan_id ON plan_items(plan_id);
 CREATE INDEX IF NOT EXISTS idx_practice_records_user_id ON practice_records(user_id);
 CREATE INDEX IF NOT EXISTS idx_practice_records_material_id ON practice_records(material_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_records_user_operation_id
+  ON practice_records(user_id, operation_id)
+  WHERE operation_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_recordings_practice_record_id ON recordings(practice_record_id);
