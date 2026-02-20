@@ -34,6 +34,9 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   if (step === "duration") {
     const minutes = Number(formData.get("minutes") || 20);
+    if (!Number.isInteger(minutes) || ![10, 20, 30].includes(minutes)) {
+      return { step: "duration", success: false, error: "请选择有效的练习时长" };
+    }
     await env.DB.prepare("UPDATE users SET daily_minutes = ? WHERE id = ?")
       .bind(minutes, user.id)
       .run();
@@ -42,6 +45,9 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   if (step === "level") {
     const level = Number(formData.get("level") || 1);
+    if (!Number.isInteger(level) || level < 1 || level > 5) {
+      return { step: "level", success: false, error: "请选择有效的英语等级" };
+    }
     await env.DB.prepare("UPDATE users SET level = ? WHERE id = ?")
       .bind(level, user.id)
       .run();
@@ -49,7 +55,19 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   if (step === "packs") {
-    const selectedPacks = formData.getAll("packs") as string[];
+    const selectedPacks = Array.from(
+      new Set(formData.getAll("packs").map((p) => String(p)))
+    );
+    if (selectedPacks.length > 3) {
+      return { step: "packs", success: false, error: "最多只能选择 3 个语料包" };
+    }
+
+    const validPackIds = new Set(COLD_START_PACKS.map((p) => p.id));
+    const invalid = selectedPacks.find((id) => !validPackIds.has(id));
+    if (invalid) {
+      return { step: "packs", success: false, error: "语料包选择无效，请重试" };
+    }
+
     let totalImported = 0;
     const allMaterialIds: string[] = [];
     const allSentences: string[] = [];
@@ -112,6 +130,9 @@ export default function OnboardingPage() {
   const [selectedMinutes, setSelectedMinutes] = useState(20);
   const [selectedPacks, setSelectedPacks] = useState<string[]>([]);
   const lastActionDataRef = useRef<typeof actionData | null>(null);
+  const actionError = actionData && typeof actionData === "object" && "error" in actionData
+    ? String(actionData.error)
+    : null;
 
   // Advance step based on action results
   useEffect(() => {
@@ -151,6 +172,12 @@ export default function OnboardingPage() {
             />
           ))}
         </div>
+
+        {actionError && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <p className="text-sm text-red-700">{actionError}</p>
+          </div>
+        )}
 
         {/* Step 1: Welcome */}
         {currentStep === 1 && (

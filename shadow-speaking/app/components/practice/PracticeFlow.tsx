@@ -33,6 +33,7 @@ interface PracticeFlowProps {
     recordings: Map<string, Blob>;
   }) => void;
   onExit: () => void;
+  submitError?: string | null;
 }
 
 function safeJsonParse<T>(json: string | null, fallback: T): T {
@@ -40,13 +41,73 @@ function safeJsonParse<T>(json: string | null, fallback: T): T {
   try { return JSON.parse(json) as T; } catch { return fallback; }
 }
 
-export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps) {
+export function PracticeFlow({
+  material,
+  onComplete,
+  onExit,
+  submitError = null,
+}: PracticeFlowProps) {
   const flow = usePracticeFlow({ onComplete });
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const isIdle = navigation.state === "idle";
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
+  const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const submitAttemptedRef = useRef(false);
+  const failureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (failureTimerRef.current) {
+        clearTimeout(failureTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isSubmitting) {
+      if (failureTimerRef.current) {
+        clearTimeout(failureTimerRef.current);
+        failureTimerRef.current = null;
+      }
+      submitAttemptedRef.current = true;
+      setSubmitErrorMessage(null);
+    }
+  }, [isSubmitting]);
+
+  useEffect(() => {
+    if (!isIdle) return;
+
+    if (!flow.state.finished) {
+      submitAttemptedRef.current = false;
+      return;
+    }
+
+    if (submitAttemptedRef.current) {
+      if (failureTimerRef.current) {
+        clearTimeout(failureTimerRef.current);
+      }
+      // Delay failure hint briefly; successful redirect usually unmounts before this fires.
+      failureTimerRef.current = setTimeout(() => {
+        submitAttemptedRef.current = false;
+        setSubmitErrorMessage("保存失败，请检查网络后重试。");
+        flow.resetCompletion();
+      }, 300);
+    }
+  }, [isIdle, flow.state.finished, flow.resetCompletion]);
+
+  useEffect(() => {
+    if (!submitError) return;
+    if (failureTimerRef.current) {
+      clearTimeout(failureTimerRef.current);
+      failureTimerRef.current = null;
+    }
+    submitAttemptedRef.current = false;
+    setSubmitErrorMessage(submitError);
+    flow.resetCompletion();
+  }, [submitError, flow.resetCompletion]);
 
   // Focus trap + Escape for exit dialog
   useEffect(() => {
@@ -130,6 +191,11 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
     }, 150);
   }, [flow.nextStage]);
 
+  const handleGoBackToRound2 = useCallback(() => {
+    flow.setHasLongSilence(false);
+    flow.goBackToRound2();
+  }, [flow.setHasLongSilence, flow.goBackToRound2]);
+
   const renderStage = () => {
     switch (flow.state.stage) {
       case 1:
@@ -174,7 +240,7 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
             onRecording={handleAddRecording}
             onLongSilence={() => flow.setHasLongSilence(true)}
             onComplete={() => goToStageAnimated(5)}
-            onGoBackToRound2={flow.goBackToRound2}
+            onGoBackToRound2={handleGoBackToRound2}
             initialRound={flow.state.round}
           />
         );
@@ -268,6 +334,20 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
           </div>
         </div>
       </div>
+
+      {submitErrorMessage && (
+        <div className="max-w-lg mx-auto px-4 pt-4">
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start justify-between gap-3">
+            <p className="text-sm text-red-700">{submitErrorMessage}</p>
+            <button
+              onClick={() => setSubmitErrorMessage(null)}
+              className="text-xs text-red-600 hover:text-red-700 shrink-0"
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stage content with fade transition */}
       <div className="max-w-lg mx-auto px-4 py-6" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>

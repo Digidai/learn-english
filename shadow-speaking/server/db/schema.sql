@@ -107,6 +107,22 @@ CREATE TABLE IF NOT EXISTS recordings (
   FOREIGN KEY (material_id) REFERENCES materials(id)
 );
 
+-- Preprocess job tracking (for stuck-processing recovery)
+CREATE TABLE IF NOT EXISTS preprocess_jobs (
+  material_id TEXT PRIMARY KEY,
+  started_at INTEGER NOT NULL,
+  FOREIGN KEY (material_id) REFERENCES materials(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_preprocess_jobs_started_at ON preprocess_jobs(started_at);
+
+-- Generic operation locks
+CREATE TABLE IF NOT EXISTS operation_locks (
+  lock_key TEXT PRIMARY KEY,
+  owner_token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_recordings_material ON recordings(material_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_plan_items_plan_id ON plan_items(plan_id);
 CREATE INDEX IF NOT EXISTS idx_practice_records_user_id ON practice_records(user_id);

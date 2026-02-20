@@ -115,6 +115,13 @@ export function usePracticeFlow(options: UsePracticeFlowOptions) {
     }));
   }, []);
 
+  const resetCompletion = useCallback(() => {
+    setState((prev) => {
+      if (!prev.finished) return prev;
+      return { ...prev, finished: null };
+    });
+  }, []);
+
   return {
     state,
     goToStage,
@@ -126,5 +133,6 @@ export function usePracticeFlow(options: UsePracticeFlowOptions) {
     nextStage,
     exitEarly,
     goBackToRound2,
+    resetCompletion,
   };
 }

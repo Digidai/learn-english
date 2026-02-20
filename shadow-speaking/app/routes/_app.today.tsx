@@ -21,31 +21,33 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // Try to get today's plan, generate if not exists
   let { plan, items } = await getTodayPlan(env.DB, user.id, today);
 
-  if (!plan) {
-    const result = await generateDailyPlan(env.DB, user, today);
-    if (result) {
-      const data = await getTodayPlan(env.DB, user.id, today);
-      plan = data.plan;
-      items = data.items;
-    }
+  // Self-heal empty plans and generate when needed
+  if (!plan || items.length === 0) {
+    await generateDailyPlan(env.DB, user, today);
+    const refreshed = await getTodayPlan(env.DB, user.id, today);
+    plan = refreshed.plan;
+    items = refreshed.items;
   }
 
   // Check if user has ANY materials at all (to distinguish empty states)
   const materialStats = await env.DB.prepare(
-    "SELECT COUNT(*) as total, SUM(CASE WHEN preprocess_status != 'done' THEN 1 ELSE 0 END) as pending FROM materials WHERE user_id = ?"
+    `SELECT COUNT(*) as total,
+            SUM(CASE WHEN preprocess_status IN ('pending', 'processing') THEN 1 ELSE 0 END) as pending
+     FROM materials
+     WHERE user_id = ?`
   ).bind(user.id).first<{ total: number; pending: number }>();
 
   const hasAnyMaterials = (materialStats?.total || 0) > 0;
   const hasPendingMaterials = (materialStats?.pending || 0) > 0;
 
-  // Auto-retry stale pending/failed materials that were never processed
+  // Auto-retry stale pending materials that were never processed
   if (hasPendingMaterials) {
     const apiKey = env.MINIMAX_API_KEY;
     if (apiKey) {
       const oneMinAgo = new Date(now.getTime() - 60_000).toISOString();
       const staleMaterials = await env.DB.prepare(
         `SELECT id, content FROM materials
-         WHERE user_id = ? AND preprocess_status IN ('pending', 'failed')
+         WHERE user_id = ? AND preprocess_status = 'pending'
          AND created_at < ?
          LIMIT 15`
       ).bind(user.id, oneMinAgo).all<{ id: string; content: string }>();

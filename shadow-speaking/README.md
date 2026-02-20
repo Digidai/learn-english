@@ -175,6 +175,12 @@ wrangler d1 execute shadow-speaking-db --local --file=server/db/schema.sql
 # Set MiniMax API key / 设置 MiniMax API 密钥
 wrangler secret put MINIMAX_API_KEY
 # Enter your API key when prompted / 按提示输入 API 密钥
+
+# Set admin whitelist for retry-preprocess API (comma-separated usernames)
+# 设置 retry-preprocess 接口管理员白名单（逗号分隔的用户名）
+wrangler secret put RETRY_PREPROCESS_ADMIN_USERS
+# Example input: dai,alice,bob
+# 示例输入：dai,alice,bob
 ```
 
 ### 6. Local Development / 本地开发
@@ -203,9 +209,19 @@ This builds the project and deploys to Cloudflare Workers.
 
 ### 8. Verify Cron / 验证定时任务
 
-The cron trigger runs at **UTC 20:00 daily** (Beijing 04:00) to generate next-day practice plans and reset streaks.
+The cron trigger runs at **UTC 20:00 daily** (Beijing 04:00) to generate daily practice plans and recover stale preprocessing jobs.
 
-定时任务每天 **UTC 20:00**（北京时间 04:00）运行，生成次日练习计划并重置断连。
+定时任务每天 **UTC 20:00**（北京时间 04:00）运行，生成当日练习计划并恢复卡住的预处理任务。
+
+### 9. Admin API: Retry Preprocess / 管理员接口：重试预处理
+
+- Endpoint: `POST /api/retry-preprocess`
+- Auth: must be logged in and username must be in `RETRY_PREPROCESS_ADMIN_USERS`
+- Scope: retries up to 30 materials with `preprocess_status = 'pending'` (failed materials are reset to pending first)
+
+- 接口：`POST /api/retry-preprocess`
+- 鉴权：必须先登录，且用户名在 `RETRY_PREPROCESS_ADMIN_USERS` 白名单内
+- 范围：单次最多重试 30 条 `preprocess_status = 'pending'` 的语料（会先把 `failed` 重置为 `pending`）
 
 ---
 
@@ -232,6 +248,8 @@ The cron trigger runs at **UTC 20:00 daily** (Beijing 04:00) to generate next-da
 | `plan_items` | Individual items in a plan / 计划条目 |
 | `practice_records` | Practice session records / 练习记录 |
 | `recordings` | User voice recordings metadata / 录音元数据 |
+| `preprocess_jobs` | In-flight preprocessing tracking / 预处理进行中任务跟踪 |
+| `operation_locks` | Server-side operation locks / 服务端操作互斥锁 |
 
 ---
 
@@ -253,8 +271,8 @@ User Browser
     |   +-- MiniMax TTS: 3-speed audio -> R2
     |
     +-- Cron (UTC 20:00)
-        +-- Generate next-day plans
-        +-- Reset broken streaks
+        +-- Generate daily plans (UTC+8 date)
+        +-- Recover stale preprocess jobs
 ```
 
 ---
@@ -263,7 +281,7 @@ User Browser
 
 - PBKDF2 password hashing (100k iterations, SHA-256) with timing-safe comparison
 - Cookie-based sessions (HttpOnly, Secure, SameSite=Lax) stored in KV
-- Login rate limiting (5 attempts / 5 minutes, 15-minute lockout)
+- Login rate limiting (max 5 failed attempts, then 15-minute lockout)
 - Audio API requires authentication and validates resource ownership
 - All database mutations verify user ownership
 - Input length validation to prevent abuse

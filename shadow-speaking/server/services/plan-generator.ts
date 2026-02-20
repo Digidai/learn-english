@@ -36,13 +36,27 @@ export async function generateDailyPlan(
   // Check if plan already exists
   const existing = await db
     .prepare(
-      "SELECT id FROM daily_plans WHERE user_id = ? AND plan_date = ?"
+      "SELECT id, total_items, completed_items FROM daily_plans WHERE user_id = ? AND plan_date = ?"
     )
     .bind(user.id, planDate)
-    .first();
+    .first<{ id: string; total_items: number; completed_items: number }>();
 
   if (existing) {
-    return null; // Already exists
+    const itemCount = await db
+      .prepare("SELECT COUNT(*) as count FROM plan_items WHERE plan_id = ?")
+      .bind(existing.id)
+      .first<{ count: number }>();
+
+    const realCount = itemCount?.count || 0;
+    if (realCount > 0) {
+      return null; // Already exists and healthy
+    }
+
+    // Self-heal broken empty plan (e.g. partial insert failure)
+    await db.batch([
+      db.prepare("DELETE FROM plan_items WHERE plan_id = ?").bind(existing.id),
+      db.prepare("DELETE FROM daily_plans WHERE id = ?").bind(existing.id),
+    ]);
   }
 
   // Calculate total items: daily_minutes / 2, capped at MAX_PLAN_ITEMS
@@ -162,7 +176,7 @@ export async function regenerateDailyPlan(
   user: UserProfile,
   planDate: string
 ): Promise<DailyPlanResult | RegenerateDailyPlanBlocked | null> {
-  // Delete existing plan for today (only if no items completed)
+  // Delete existing plan for today (only when no started/completed items)
   const existingPlan = await db
     .prepare(
       "SELECT id, completed_items FROM daily_plans WHERE user_id = ? AND plan_date = ?"
@@ -171,10 +185,13 @@ export async function regenerateDailyPlan(
     .first<{ id: string; completed_items: number }>();
 
   if (existingPlan) {
-    // Check for any non-pending (in-progress or completed) items
+    // Block regeneration once any item is started or completed
     const nonPending = await db
       .prepare(
-        "SELECT COUNT(*) as count FROM plan_items WHERE plan_id = ? AND status != 'pending'"
+        `SELECT COUNT(*) as count
+         FROM plan_items
+         WHERE plan_id = ?
+           AND (status != 'pending' OR started_at IS NOT NULL)`
       )
       .bind(existingPlan.id)
       .first<{ count: number }>();
@@ -184,15 +201,29 @@ export async function regenerateDailyPlan(
       return { blocked: true, reason: REGENERATE_BLOCKED_REASON };
     }
 
-    // Delete pending items and empty plan atomically
+    // Delete untouched pending items and then remove empty plan
     await db.batch([
       db
-        .prepare("DELETE FROM plan_items WHERE plan_id = ? AND status = 'pending'")
+        .prepare(
+          "DELETE FROM plan_items WHERE plan_id = ? AND status = 'pending' AND started_at IS NULL"
+        )
         .bind(existingPlan.id),
       db
-        .prepare("DELETE FROM daily_plans WHERE id = ? AND completed_items = 0")
-        .bind(existingPlan.id),
+        .prepare(
+          `DELETE FROM daily_plans
+           WHERE id = ? AND completed_items = 0
+             AND NOT EXISTS (SELECT 1 FROM plan_items WHERE plan_id = ?)`
+        )
+        .bind(existingPlan.id, existingPlan.id),
     ]);
+
+    const remains = await db
+      .prepare("SELECT id FROM daily_plans WHERE id = ?")
+      .bind(existingPlan.id)
+      .first<{ id: string }>();
+    if (remains) {
+      return { blocked: true, reason: REGENERATE_BLOCKED_REASON };
+    }
   }
 
   return generateDailyPlan(db, user, planDate);

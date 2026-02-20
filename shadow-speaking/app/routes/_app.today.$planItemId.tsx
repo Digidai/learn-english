@@ -1,4 +1,13 @@
-import { useNavigate, useLoaderData, useSubmit, redirect, Link, useRouteError, isRouteErrorResponse } from "react-router";
+import {
+  useNavigate,
+  useLoaderData,
+  useSubmit,
+  useActionData,
+  redirect,
+  Link,
+  useRouteError,
+  isRouteErrorResponse,
+} from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { handlePracticeComplete } from "../../server/api/practice";
 import { PracticeFlow } from "~/components/practice/PracticeFlow";
@@ -37,6 +46,16 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     throw redirect("/today?notice=completed");
   }
 
+  // Mark as started when user enters the practice page (idempotent)
+  await env.DB.prepare(
+    `UPDATE plan_items
+     SET status = 'in_progress',
+         started_at = COALESCE(started_at, datetime('now'))
+     WHERE id = ? AND status = 'pending'`
+  )
+    .bind(planItemId)
+    .run();
+
   return { material: planItem, planItemId };
 }
 
@@ -46,29 +65,47 @@ export async function action({ request, context }: Route.ActionArgs) {
     const user = await requireAuth(request, env);
     const formData = await request.formData();
 
-    const materialId = String(formData.get("materialId"));
-    const planItemId = String(formData.get("planItemId"));
+    const materialIdValue = formData.get("materialId");
+    const planItemIdValue = formData.get("planItemId");
+    if (
+      typeof materialIdValue !== "string" ||
+      !materialIdValue ||
+      typeof planItemIdValue !== "string" ||
+      !planItemIdValue
+    ) {
+      return Response.json({ ok: false, error: "参数无效，请重新提交。" }, { status: 400 });
+    }
+
+    const materialId = materialIdValue;
+    const planItemId = planItemIdValue;
     const selfRating = formData.get("selfRating") as string | null;
     const isPoorPerformance = formData.get("isPoorPerformance") === "true";
     const completedAllStages = formData.get("completedAllStages") !== "false";
-    const durationSeconds = Number(formData.get("durationSeconds") || 0);
+    const rawDuration = Number(formData.get("durationSeconds") || 0);
+    const durationSeconds = Number.isFinite(rawDuration) && rawDuration > 0
+      ? Math.floor(rawDuration)
+      : 0;
 
-    // Validate ownership via JOIN (single query instead of two)
-    const valid = await env.DB.prepare(
-      `SELECT pi.id FROM plan_items pi
+    // Validate ownership + current status
+    const planItem = await env.DB.prepare(
+      `SELECT pi.id, pi.status as item_status FROM plan_items pi
        JOIN daily_plans dp ON pi.plan_id = dp.id
        JOIN materials m ON pi.material_id = m.id
        WHERE pi.id = ? AND dp.user_id = ? AND m.id = ? AND m.user_id = ?`
     )
       .bind(planItemId, user.id, materialId, user.id)
-      .first();
+      .first<{ id: string; item_status: string }>();
 
-    if (!valid) {
+    if (!planItem) {
       return redirect("/today");
     }
 
+    if (planItem.item_status === "completed") {
+      return redirect("/today?notice=completed");
+    }
+
     // Use handlePracticeComplete which includes spaced repetition + streak updates
-    const recordId = await handlePracticeComplete(
+    const completeResult = await handlePracticeComplete(
       env.DB,
       user.id,
       materialId,
@@ -78,6 +115,12 @@ export async function action({ request, context }: Route.ActionArgs) {
       durationSeconds,
       completedAllStages
     );
+
+    if (!completeResult.accepted || !completeResult.recordId) {
+      return redirect("/today?notice=completed");
+    }
+
+    const recordId = completeResult.recordId;
 
     // Upload recordings to R2 in parallel, then batch-insert DB rows
     const recordingEntries = formData.getAll("recordingKey");
@@ -155,7 +198,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     }
 
     console.error("[PracticeDetailAction] Failed to complete practice", error);
-    return redirect("/today");
+    return Response.json({ ok: false, error: "保存失败，请重试。" }, { status: 500 });
   }
 }
 
@@ -208,6 +251,9 @@ interface PracticeMaterial {
 
 export default function PracticeDetailPage() {
   const { material, planItemId } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>() as
+    | { ok: false; error: string }
+    | undefined;
   const navigate = useNavigate();
   const submit = useSubmit();
 
@@ -249,6 +295,7 @@ export default function PracticeDetailPage() {
       material={m}
       onComplete={handleComplete}
       onExit={handleExit}
+      submitError={actionData?.error || null}
     />
   );
 }

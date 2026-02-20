@@ -2,6 +2,18 @@ import { generateDailyPlan } from "../services/plan-generator";
 import { preprocessMaterial } from "../services/minimax";
 
 const CONCURRENCY_LIMIT = 10;
+let hasPreprocessJobsTable = false;
+
+async function ensurePreprocessJobsTable(db: D1Database): Promise<void> {
+  if (hasPreprocessJobsTable) return;
+  await db.exec(
+    `CREATE TABLE IF NOT EXISTS preprocess_jobs (
+      material_id TEXT PRIMARY KEY,
+      started_at INTEGER NOT NULL
+    )`
+  );
+  hasPreprocessJobsTable = true;
+}
 
 export async function handleDailyPlanCron(env: Env): Promise<void> {
   // Use UTC+8 (China time) consistently — cron runs at UTC 20:00 = Beijing 04:00 next day
@@ -11,15 +23,31 @@ export async function handleDailyPlanCron(env: Env): Promise<void> {
 
   console.log(`[Cron] Generating daily plans for ${planDate}`);
 
-  // Recovery: reset materials stuck in 'processing' for > 5 minutes back to 'pending'
-  const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
-  const stuckReset = await env.DB.prepare(
-    `UPDATE materials SET preprocess_status = 'pending'
-     WHERE preprocess_status = 'processing'
-     AND datetime(created_at) < datetime(?)`
-  ).bind(fiveMinutesAgo).run();
-  if (stuckReset.meta.changes > 0) {
-    console.log(`[Cron] Reset ${stuckReset.meta.changes} stuck processing materials`);
+  // Recovery: reset materials tracked as 'processing' for > 5 minutes back to 'pending'
+  await ensurePreprocessJobsTable(env.DB);
+  const staleThreshold = Math.floor(Date.now() / 1000) - 5 * 60;
+  const staleJobs = await env.DB.prepare(
+    "SELECT material_id FROM preprocess_jobs WHERE started_at <= ? LIMIT 100"
+  )
+    .bind(staleThreshold)
+    .all<{ material_id: string }>();
+
+  if (staleJobs.results.length > 0) {
+    const resetStatements: D1PreparedStatement[] = [];
+    for (const job of staleJobs.results) {
+      resetStatements.push(
+        env.DB
+          .prepare(
+            "UPDATE materials SET preprocess_status = 'pending' WHERE id = ? AND preprocess_status = 'processing'"
+          )
+          .bind(job.material_id),
+        env.DB
+          .prepare("DELETE FROM preprocess_jobs WHERE material_id = ?")
+          .bind(job.material_id)
+      );
+    }
+    await env.DB.batch(resetStatements);
+    console.log(`[Cron] Reset ${staleJobs.results.length} stale processing jobs`);
   }
 
   // Retry pending/failed materials that were never processed

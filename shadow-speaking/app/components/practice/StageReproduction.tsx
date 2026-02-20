@@ -19,16 +19,17 @@ export function StageReproduction({
   onSelfRating,
   onComplete,
 }: Props) {
+  const STAGE5_RECORDING_KEY = "stage5";
   const [hasRecorded, setHasRecorded] = useState(false);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
   const [selectedRating, setSelectedRating] = useState<string | null>(null);
 
   const handleRecordingComplete = (blob: Blob) => {
+    if (recordingUrl) URL.revokeObjectURL(recordingUrl);
     const url = URL.createObjectURL(blob);
     setRecordingUrl(url);
-    const key = `stage5-${Date.now()}`;
-    onRecording(key, blob);
+    onRecording(STAGE5_RECORDING_KEY, blob);
     setHasRecorded(true);
     setShowOriginal(true);
   };

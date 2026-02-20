@@ -4,6 +4,7 @@ interface MaterialReviewData {
   id: string;
   review_count: number;
   status: string;
+  last_practice_date: string | null;
 }
 
 interface PracticeResult {
@@ -91,26 +92,52 @@ export async function updateMaterialAfterPractice(
   practice: PracticeResult,
   today: string
 ): Promise<void> {
-  const material = await db
-    .prepare("SELECT id, review_count, status FROM materials WHERE id = ?")
-    .bind(materialId)
-    .first<MaterialReviewData>();
+  const MAX_CAS_RETRIES = 5;
 
-  if (!material) return;
+  for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
+    const material = await db
+      .prepare(
+        "SELECT id, review_count, status, last_practice_date FROM materials WHERE id = ?"
+      )
+      .bind(materialId)
+      .first<MaterialReviewData>();
 
-  const result = calculateNextReview(material, practice, today);
+    if (!material) return;
 
-  await db
-    .prepare(
-      `UPDATE materials SET
-        review_count = ?,
-        next_review_date = ?,
-        status = ?,
-        last_practice_date = ?
-       WHERE id = ?`
-    )
-    .bind(result.reviewCount, result.nextReviewDate, result.newStatus, today, materialId)
-    .run();
+    const result = calculateNextReview(material, practice, today);
+
+    const update = await db
+      .prepare(
+        `UPDATE materials SET
+          review_count = ?,
+          next_review_date = ?,
+          status = ?,
+          last_practice_date = ?
+         WHERE id = ?
+           AND review_count = ?
+           AND status = ?
+           AND ifnull(last_practice_date, '') = ifnull(?, '')`
+      )
+      .bind(
+        result.reviewCount,
+        result.nextReviewDate,
+        result.newStatus,
+        today,
+        materialId,
+        material.review_count,
+        material.status,
+        material.last_practice_date
+      )
+      .run();
+
+    if (update.meta.changes > 0) {
+      return;
+    }
+  }
+
+  console.warn(
+    `[SpacedRepetition] CAS update failed after retries for material ${materialId}`
+  );
 }
 
 function addDays(dateStr: string, days: number): string {

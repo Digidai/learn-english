@@ -115,6 +115,18 @@ const ANALYSIS_FUNCTION = {
 
 // Reusable OpenAI client cache (per apiKey)
 let cachedClient: { key: string; client: OpenAI } | null = null;
+let hasPreprocessJobsTable = false;
+
+async function ensurePreprocessJobsTable(db: D1Database): Promise<void> {
+  if (hasPreprocessJobsTable) return;
+  await db.exec(
+    `CREATE TABLE IF NOT EXISTS preprocess_jobs (
+      material_id TEXT PRIMARY KEY,
+      started_at INTEGER NOT NULL
+    )`
+  );
+  hasPreprocessJobsTable = true;
+}
 
 function getClient(apiKey: string): OpenAI {
   if (cachedClient && cachedClient.key === apiKey) {
@@ -280,7 +292,11 @@ export async function preprocessMaterial(
   db: D1Database,
   r2: R2Bucket
 ): Promise<void> {
+  let didClaimProcessing = false;
+
   try {
+    await ensurePreprocessJobsTable(db);
+
     // CAS: only start processing if currently pending or failed
     const cas = await db
       .prepare(
@@ -293,6 +309,15 @@ export async function preprocessMaterial(
       // Already being processed or done — skip
       return;
     }
+    didClaimProcessing = true;
+
+    const startedAt = Math.floor(Date.now() / 1000);
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO preprocess_jobs (material_id, started_at) VALUES (?, ?)"
+      )
+      .bind(materialId, startedAt)
+      .run();
 
     // Clean markdown/URLs from text for TTS and analysis
     const cleanText = stripMarkdown(sentence);
@@ -309,6 +334,7 @@ export async function preprocessMaterial(
         ).bind(cnt, cnt, plan_id)
       );
       statements.push(
+        db.prepare("DELETE FROM preprocess_jobs WHERE material_id = ?").bind(materialId),
         db.prepare("DELETE FROM plan_items WHERE material_id = ?").bind(materialId),
         db.prepare("DELETE FROM recordings WHERE material_id = ?").bind(materialId),
         db.prepare("DELETE FROM practice_records WHERE material_id = ?").bind(materialId),
@@ -381,6 +407,11 @@ export async function preprocessMaterial(
         materialId
       )
       .run();
+
+    await db
+      .prepare("DELETE FROM preprocess_jobs WHERE material_id = ?")
+      .bind(materialId)
+      .run();
   } catch (error) {
     console.error(`Preprocessing failed for material ${materialId}:`, error);
     await db
@@ -389,5 +420,12 @@ export async function preprocessMaterial(
       )
       .bind(materialId)
       .run();
+
+    if (didClaimProcessing) {
+      await db
+        .prepare("DELETE FROM preprocess_jobs WHERE material_id = ?")
+        .bind(materialId)
+        .run();
+    }
   }
 }
