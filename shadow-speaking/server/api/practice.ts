@@ -148,25 +148,22 @@ export async function handlePracticeComplete(
     // Best-effort compensation: avoid locking plan item in completed state on partial failures
     try {
       if (planItemId && planId && previousPlanItemStatus) {
-        const rollbackStatements: D1PreparedStatement[] = [
-          db
+        const rollbackItemResult = await db
+          .prepare(
+            "UPDATE plan_items SET status = ?, completed_at = NULL WHERE id = ? AND status = 'completed'"
+          )
+          .bind(previousPlanItemStatus, planItemId)
+          .run();
+
+        // Only decrement plan counters if we actually rolled the item state back.
+        if (didIncrementPlanCount && rollbackItemResult.meta.changes > 0) {
+          await db
             .prepare(
-              "UPDATE plan_items SET status = ?, completed_at = NULL WHERE id = ? AND status = 'completed'"
+              "UPDATE daily_plans SET completed_items = CASE WHEN completed_items > 0 THEN completed_items - 1 ELSE 0 END WHERE id = ?"
             )
-            .bind(previousPlanItemStatus, planItemId),
-        ];
-
-        if (didIncrementPlanCount) {
-          rollbackStatements.push(
-            db
-              .prepare(
-                "UPDATE daily_plans SET completed_items = CASE WHEN completed_items > 0 THEN completed_items - 1 ELSE 0 END WHERE id = ?"
-              )
-              .bind(planId)
-          );
+            .bind(planId)
+            .run();
         }
-
-        await db.batch(rollbackStatements);
       }
 
       if (recordId) {
