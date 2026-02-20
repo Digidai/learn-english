@@ -325,13 +325,47 @@ export async function preprocessMaterial(
     if (cleanText.length < 5 || wordCount < 3) {
       // Not a valid sentence — update daily_plan counters, cascade-delete, then the material
       const planItemCounts = await db.prepare(
-        `SELECT plan_id, COUNT(*) as cnt FROM plan_items WHERE material_id = ? GROUP BY plan_id`
-      ).bind(materialId).all<{ plan_id: string; cnt: number }>();
+        `SELECT
+            plan_id,
+            COUNT(*) as total_cnt,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_cnt
+         FROM plan_items
+         WHERE material_id = ?
+         GROUP BY plan_id`
+      ).bind(materialId).all<{
+        plan_id: string;
+        total_cnt: number;
+        completed_cnt: number;
+      }>();
 
-      const statements: D1PreparedStatement[] = planItemCounts.results.map(({ plan_id, cnt }) =>
-        db.prepare(
-          `UPDATE daily_plans SET total_items = CASE WHEN total_items >= ? THEN total_items - ? ELSE 0 END WHERE id = ?`
-        ).bind(cnt, cnt, plan_id)
+      const statements: D1PreparedStatement[] = planItemCounts.results.map(
+        ({ plan_id, total_cnt, completed_cnt }) =>
+          db.prepare(
+            `UPDATE daily_plans
+             SET total_items = CASE
+                 WHEN total_items >= ? THEN total_items - ?
+                 ELSE 0
+               END,
+               completed_items = MIN(
+                 CASE
+                   WHEN completed_items >= ? THEN completed_items - ?
+                   ELSE 0
+                 END,
+                 CASE
+                   WHEN total_items >= ? THEN total_items - ?
+                   ELSE 0
+                 END
+               )
+             WHERE id = ?`
+          ).bind(
+            total_cnt,
+            total_cnt,
+            completed_cnt,
+            completed_cnt,
+            total_cnt,
+            total_cnt,
+            plan_id
+          )
       );
       statements.push(
         db.prepare("DELETE FROM preprocess_jobs WHERE material_id = ?").bind(materialId),
