@@ -98,7 +98,7 @@ export default function CorpusPage() {
     useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
-  const isRetrying = navigation.state === "submitting";
+  const isRetrying = navigation.formData?.get("intent") === "retry-all-failed";
 
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -272,7 +272,7 @@ export default function CorpusPage() {
                     {tag}
                   </span>
                 ))}
-                {material.preprocess_status === "pending" && (
+                {(material.preprocess_status === "pending" || material.preprocess_status === "processing") && (
                   <span className="text-xs text-amber-500">处理中...</span>
                 )}
                 {material.preprocess_status === "failed" && (

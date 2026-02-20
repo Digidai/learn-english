@@ -1,11 +1,22 @@
 import { checkRetirementProtection } from "./level-assessor";
 
 const MAX_PLAN_ITEMS = 50;
+const REGENERATE_BLOCKED_REASON = "已有进行中的练习，无法刷新计划";
 
 interface UserProfile {
   id: string;
   level: number;
   daily_minutes: number;
+}
+
+export interface DailyPlanResult {
+  planId: string;
+  totalItems: number;
+}
+
+export interface RegenerateDailyPlanBlocked {
+  blocked: true;
+  reason: string;
 }
 
 interface MaterialForPlan {
@@ -21,7 +32,7 @@ export async function generateDailyPlan(
   db: D1Database,
   user: UserProfile,
   planDate: string
-): Promise<{ planId: string; totalItems: number } | null> {
+): Promise<DailyPlanResult | null> {
   // Check if plan already exists
   const existing = await db
     .prepare(
@@ -150,7 +161,7 @@ export async function regenerateDailyPlan(
   db: D1Database,
   user: UserProfile,
   planDate: string
-): Promise<{ planId: string; totalItems: number } | null> {
+): Promise<DailyPlanResult | RegenerateDailyPlanBlocked | null> {
   // Delete existing plan for today (only if no items completed)
   const existingPlan = await db
     .prepare(
@@ -170,7 +181,7 @@ export async function regenerateDailyPlan(
 
     if (nonPending && nonPending.count > 0) {
       // Don't regenerate if any items are in-progress or completed
-      return null;
+      return { blocked: true, reason: REGENERATE_BLOCKED_REASON };
     }
 
     // Delete pending items and empty plan atomically

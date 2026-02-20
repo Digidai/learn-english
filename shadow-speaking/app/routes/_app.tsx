@@ -1,6 +1,7 @@
-import { Link, Outlet, redirect, useLocation } from "react-router";
+import { Link, Outlet, redirect, useLocation, useNavigation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import type { Route } from "./+types/_app";
+import { useEffect, useState, useRef } from "react";
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const user = await requireAuth(request, context.cloudflare.env);
@@ -51,11 +52,48 @@ const tabs = [
 
 export default function AppLayout({ loaderData }: Route.ComponentProps) {
   const location = useLocation();
+  const navigation = useNavigation();
+  const [progress, setProgress] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Simple progress bar logic
+  useEffect(() => {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+
+    if (navigation.state === "loading") {
+      setProgress(10);
+      intervalRef.current = setInterval(() => {
+        setProgress((prev) => (prev >= 90 ? 90 : prev + 10));
+      }, 100);
+    } else {
+      setProgress(100);
+      timeoutRef.current = setTimeout(() => {
+        setProgress(0);
+        timeoutRef.current = null;
+      }, 200);
+    }
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [navigation.state]);
+
   // Hide bottom nav during practice sessions
   const isPractice = location.pathname.match(/^\/today\/[^/]+$/);
 
   return (
-    <div className={`min-h-screen bg-gray-50 ${isPractice ? "" : "pb-20"}`}>
+    <div className={`min-h-screen bg-gray-50 ${isPractice ? "" : "pb-[calc(5rem+env(safe-area-inset-bottom))]"}`}>
+      {/* Global Progress Bar */}
+      {progress > 0 && (
+        <div 
+          className="fixed top-0 left-0 h-1 bg-blue-600 z-50 transition-all duration-200"
+          style={{ width: `${progress}%`, opacity: progress === 100 ? 0 : 1 }}
+        />
+      )}
+
       {/* Main content */}
       <main className={isPractice ? "" : "max-w-lg mx-auto px-4 py-6"}>
         <Outlet />

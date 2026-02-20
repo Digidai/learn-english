@@ -55,7 +55,26 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-4">设置</h1>
+      {/* Header with back button */}
+      <div className="flex items-center gap-3 mb-6">
+        <Link
+          to="/profile"
+          className="p-2 -ml-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"
+          aria-label="返回个人中心"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+          </svg>
+        </Link>
+        <div>
+          <nav className="flex items-center gap-1 text-xs text-gray-400 mb-0.5">
+            <Link to="/profile" className="hover:text-gray-600">个人中心</Link>
+            <span>/</span>
+            <span className="text-gray-600">设置</span>
+          </nav>
+          <h1 className="text-2xl font-bold text-gray-900 leading-tight">设置</h1>
+        </div>
+      </div>
 
       {actionData?.success && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-4">

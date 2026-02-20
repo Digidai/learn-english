@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAudioRecorder } from "~/hooks/useAudioRecorder";
+import { AudioPlayer } from "~/components/audio/AudioPlayer";
 
 interface AudioRecorderProps {
   onRecordingComplete: (blob: Blob, durationMs: number) => void;
@@ -112,36 +113,42 @@ export function AudioRecorder({
       )}
 
       {/* Record button */}
-      <button
-        onClick={handleToggle}
-        disabled={disabled}
-        aria-label={recorder.isRecording ? "停止录音" : "开始录音"}
-        aria-pressed={recorder.isRecording}
-        className={`w-16 h-16 rounded-full flex items-center justify-center transition-all active:scale-95 ${
-          recorder.isRecording
-            ? "bg-red-500 hover:bg-red-600"
-            : "bg-red-500 hover:bg-red-600"
-        } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-      >
-        {recorder.isRecording ? (
-          <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
-            <rect x="6" y="6" width="12" height="12" rx="2" />
-          </svg>
-        ) : (
-          <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="6" />
-          </svg>
+      <div className="relative">
+        {recorder.isRecording && (
+          <div className="absolute inset-0 bg-red-500 rounded-full animate-ping opacity-20" />
         )}
-      </button>
+        <button
+          onClick={handleToggle}
+          disabled={disabled}
+          aria-label={recorder.isRecording ? "停止录音" : "开始录音"}
+          aria-pressed={recorder.isRecording}
+          className={`relative z-10 w-16 h-16 rounded-full flex items-center justify-center transition-all active:scale-95 ${
+            recorder.isRecording
+              ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-200"
+              : "bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-100"
+          } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+        >
+          {recorder.isRecording ? (
+            <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          ) : (
+            <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+            </svg>
+          )}
+        </button>
+      </div>
 
-      <p className="text-xs text-gray-500">
-        {recorder.isRecording ? "点击停止录音" : "点击开始录音"}
+      <p className="text-xs font-medium text-gray-500">
+        {recorder.isRecording ? "正在录音 · 点击停止" : "准备好了 · 点击开始"}
       </p>
 
       {/* Playback */}
       {recorder.recordingUrl && !recorder.isRecording && (
         <div className="w-full">
-          <audio src={recorder.recordingUrl} controls className="w-full h-10" />
+          <AudioPlayer src={recorder.recordingUrl} label="录音回放" />
           <p className="text-xs text-gray-400 text-center mt-1">
             录音时长: {(recorder.durationMs / 1000).toFixed(1)}s
           </p>

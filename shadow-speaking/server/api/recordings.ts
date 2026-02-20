@@ -50,11 +50,15 @@ export async function handleRecordingUpload(
 
   const recordingId = crypto.randomUUID();
   const timestamp = Date.now();
-  const r2Key = `recordings/${userId}/${materialId}/${stage}/${round}/${timestamp}.webm`;
+  // Determine file extension from actual MIME type (iOS uses mp4/m4a, others use webm)
+  const mime = file.type || "audio/webm";
+  const ext = mime.includes("mp4") || mime.includes("m4a") ? "m4a" : "webm";
+  const contentType = mime.includes("mp4") || mime.includes("m4a") ? "audio/mp4" : "audio/webm";
+  const r2Key = `recordings/${userId}/${materialId}/${stage}/${round}/${timestamp}.${ext}`;
 
   // Stream directly to R2 — avoids buffering entire file in memory
   await env.R2.put(r2Key, file.stream(), {
-    httpMetadata: { contentType: "audio/webm" },
+    httpMetadata: { contentType },
   });
 
   // Write to database

@@ -220,41 +220,52 @@ export function PracticeFlow({ material, onComplete, onExit }: PracticeFlowProps
 
   // Stage color mapping for progress bar
   const stageColors = ["bg-blue-600", "bg-blue-600", "bg-blue-600", "bg-purple-600", "bg-orange-500", "bg-green-600"];
+  const stageLabels = ["理解", "精听", "跟读", "影子", "复述", "表达"];
 
   return (
     <div className="min-h-screen bg-gray-50" style={{ paddingTop: "env(safe-area-inset-top)" }}>
       {/* Header */}
-      <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 z-10" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-        <div className="flex items-center justify-between max-w-lg mx-auto">
-          <button
-            onClick={() => setShowExitConfirm(true)}
-            className="text-gray-500 hover:text-gray-700 p-1"
-            aria-label="退出练习"
-          >
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-            </svg>
-          </button>
+      <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-2 z-10">
+        <div className="max-w-lg mx-auto">
+          <div className="flex items-center justify-between mb-2">
+            <button
+              onClick={() => setShowExitConfirm(true)}
+              className="text-gray-400 hover:text-gray-600 p-1 -ml-1"
+              aria-label="退出练习"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
 
-          {/* Stage progress with color coding */}
-          <div className="flex items-center gap-1.5" role="progressbar" aria-valuenow={flow.state.stage} aria-valuemin={1} aria-valuemax={6} aria-label="练习进度">
-            {[1, 2, 3, 4, 5, 6].map((s) => (
-              <div
-                key={s}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  s < flow.state.stage
-                    ? `w-6 ${stageColors[s - 1]}`
-                    : s === flow.state.stage
-                    ? `w-8 ${stageColors[s - 1]}`
-                    : "w-6 bg-gray-200"
-                }`}
-              />
-            ))}
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider" aria-live="polite">
+              STAGE {flow.state.stage} / 6
+            </span>
+
+            <div className="w-7" /> {/* Spacer for symmetry */}
           </div>
 
-          <span className="text-xs text-gray-400" aria-live="polite">
-            {flow.state.stage}/6
-          </span>
+          {/* Detailed step indicator */}
+          <div className="flex items-center justify-between gap-1 px-1" role="progressbar" aria-valuenow={flow.state.stage} aria-valuemin={1} aria-valuemax={6} aria-label="练习进度">
+            {[1, 2, 3, 4, 5, 6].map((s) => (
+              <div key={s} className="flex-1 flex flex-col items-center gap-1.5">
+                <div
+                  className={`h-1.5 w-full rounded-full transition-all duration-300 ${
+                    s < flow.state.stage
+                      ? `${stageColors[s - 1]} opacity-40`
+                      : s === flow.state.stage
+                      ? `${stageColors[s - 1]}`
+                      : "bg-gray-200"
+                  }`}
+                />
+                <span className={`text-[10px] font-medium transition-colors ${
+                  s === flow.state.stage ? "text-gray-900" : "text-gray-400"
+                }`}>
+                  {stageLabels[s - 1]}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

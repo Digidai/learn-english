@@ -41,113 +41,122 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
-  const env = context.cloudflare.env;
-  const user = await requireAuth(request, env);
-  const formData = await request.formData();
+  try {
+    const env = context.cloudflare.env;
+    const user = await requireAuth(request, env);
+    const formData = await request.formData();
 
-  const materialId = String(formData.get("materialId"));
-  const planItemId = String(formData.get("planItemId"));
-  const selfRating = formData.get("selfRating") as string | null;
-  const isPoorPerformance = formData.get("isPoorPerformance") === "true";
-  const completedAllStages = formData.get("completedAllStages") !== "false";
-  const durationSeconds = Number(formData.get("durationSeconds") || 0);
+    const materialId = String(formData.get("materialId"));
+    const planItemId = String(formData.get("planItemId"));
+    const selfRating = formData.get("selfRating") as string | null;
+    const isPoorPerformance = formData.get("isPoorPerformance") === "true";
+    const completedAllStages = formData.get("completedAllStages") !== "false";
+    const durationSeconds = Number(formData.get("durationSeconds") || 0);
 
-  // Validate ownership via JOIN (single query instead of two)
-  const valid = await env.DB.prepare(
-    `SELECT pi.id FROM plan_items pi
-     JOIN daily_plans dp ON pi.plan_id = dp.id
-     JOIN materials m ON pi.material_id = m.id
-     WHERE pi.id = ? AND dp.user_id = ? AND m.id = ? AND m.user_id = ?`
-  )
-    .bind(planItemId, user.id, materialId, user.id)
-    .first();
+    // Validate ownership via JOIN (single query instead of two)
+    const valid = await env.DB.prepare(
+      `SELECT pi.id FROM plan_items pi
+       JOIN daily_plans dp ON pi.plan_id = dp.id
+       JOIN materials m ON pi.material_id = m.id
+       WHERE pi.id = ? AND dp.user_id = ? AND m.id = ? AND m.user_id = ?`
+    )
+      .bind(planItemId, user.id, materialId, user.id)
+      .first();
 
-  if (!valid) {
-    return redirect("/today");
-  }
+    if (!valid) {
+      return redirect("/today");
+    }
 
-  // Use handlePracticeComplete which includes spaced repetition + streak updates
-  const recordId = await handlePracticeComplete(
-    env.DB,
-    user.id,
-    materialId,
-    planItemId,
-    selfRating,
-    isPoorPerformance,
-    durationSeconds,
-    completedAllStages
-  );
-
-  // Upload recordings to R2 in parallel, then batch-insert DB rows
-  const recordingEntries = formData.getAll("recordingKey");
-  const recordingBlobs = formData.getAll("recordingBlob");
-  const recordingMimeTypes = formData.getAll("recordingMime");
-
-  // Build upload tasks: parse key first, skip unparseable ones
-  const uploads: Array<{ key: string; blob: File; stage: number; round: number; mime: string }> = [];
-  for (let i = 0; i < recordingEntries.length; i++) {
-    const key = String(recordingEntries[i]);
-    const blob = recordingBlobs[i];
-    if (!(blob instanceof File) || blob.size === 0) continue;
-
-    // Parse key format: "stage4-round2-timestamp" → stage=4, round=2
-    const match = key.match(/^stage(\d+)(?:-round(\d+))?/);
-    if (!match) continue;
-    const mime = String(recordingMimeTypes[i] || blob.type || "audio/webm;codecs=opus");
-    uploads.push({
-      key,
-      blob,
-      stage: parseInt(match[1], 10),
-      round: match[2] ? parseInt(match[2], 10) : 1,
-      mime,
-    });
-  }
-
-  if (uploads.length > 0) {
-    // Determine file extension from MIME type
-    const extFromMime = (mime: string) => {
-      if (mime.includes("mp4")) return "m4a";
-      if (mime.includes("webm")) return "webm";
-      return "webm";
-    };
-
-    // R2 uploads in parallel with allSettled (partial failure tolerance)
-    const results = await Promise.allSettled(
-      uploads.map(async ({ key, blob, mime }) => {
-        const ext = extFromMime(mime);
-        const r2Key = `recordings/${user.id}/${materialId}/${key}.${ext}`;
-        await env.R2.put(r2Key, blob.stream(), {
-          httpMetadata: { contentType: mime },
-        });
-        return r2Key;
-      })
+    // Use handlePracticeComplete which includes spaced repetition + streak updates
+    const recordId = await handlePracticeComplete(
+      env.DB,
+      user.id,
+      materialId,
+      planItemId,
+      selfRating,
+      isPoorPerformance,
+      durationSeconds,
+      completedAllStages
     );
 
-    // Batch-insert DB rows only for successful uploads
-    const dbInserts: Array<{ stage: number; round: number; r2Key: string }> = [];
-    results.forEach((result, i) => {
-      if (result.status === "fulfilled") {
-        dbInserts.push({
-          stage: uploads[i].stage,
-          round: uploads[i].round,
-          r2Key: result.value,
-        });
-      }
-    });
+    // Upload recordings to R2 in parallel, then batch-insert DB rows
+    const recordingEntries = formData.getAll("recordingKey");
+    const recordingBlobs = formData.getAll("recordingBlob");
+    const recordingMimeTypes = formData.getAll("recordingMime");
 
-    if (dbInserts.length > 0) {
-      await env.DB.batch(
-        dbInserts.map(({ stage, round, r2Key }) =>
-          env.DB.prepare(
-            `INSERT INTO recordings (id, practice_record_id, material_id, stage, round, r2_key, duration_ms)
-             VALUES (?, ?, ?, ?, ?, ?, 0)`
-          ).bind(crypto.randomUUID(), recordId, materialId, stage, round, r2Key)
-        )
-      );
+    // Build upload tasks: parse key first, skip unparseable ones
+    const uploads: Array<{ key: string; blob: File; stage: number; round: number; mime: string }> = [];
+    for (let i = 0; i < recordingEntries.length; i++) {
+      const key = String(recordingEntries[i]);
+      const blob = recordingBlobs[i];
+      if (!(blob instanceof File) || blob.size === 0) continue;
+
+      // Parse key format: "stage4-round2-timestamp" → stage=4, round=2
+      const match = key.match(/^stage(\d+)(?:-round(\d+))?/);
+      if (!match) continue;
+      const mime = String(recordingMimeTypes[i] || blob.type || "audio/webm;codecs=opus");
+      uploads.push({
+        key,
+        blob,
+        stage: parseInt(match[1], 10),
+        round: match[2] ? parseInt(match[2], 10) : 1,
+        mime,
+      });
     }
-  }
 
-  return redirect("/today");
+    if (uploads.length > 0) {
+      // Determine file extension from MIME type
+      const extFromMime = (mime: string) => {
+        if (mime.includes("mp4")) return "m4a";
+        if (mime.includes("webm")) return "webm";
+        return "webm";
+      };
+
+      // R2 uploads in parallel with allSettled (partial failure tolerance)
+      const results = await Promise.allSettled(
+        uploads.map(async ({ key, blob, mime }) => {
+          const ext = extFromMime(mime);
+          const r2Key = `recordings/${user.id}/${materialId}/${key}.${ext}`;
+          await env.R2.put(r2Key, blob.stream(), {
+            httpMetadata: { contentType: mime },
+          });
+          return r2Key;
+        })
+      );
+
+      // Batch-insert DB rows only for successful uploads
+      const dbInserts: Array<{ stage: number; round: number; r2Key: string }> = [];
+      results.forEach((result, i) => {
+        if (result.status === "fulfilled") {
+          dbInserts.push({
+            stage: uploads[i].stage,
+            round: uploads[i].round,
+            r2Key: result.value,
+          });
+        }
+      });
+
+      if (dbInserts.length > 0) {
+        await env.DB.batch(
+          dbInserts.map(({ stage, round, r2Key }) =>
+            env.DB.prepare(
+              `INSERT INTO recordings (id, practice_record_id, material_id, stage, round, r2_key, duration_ms)
+               VALUES (?, ?, ?, ?, ?, ?, 0)`
+            ).bind(crypto.randomUUID(), recordId, materialId, stage, round, r2Key)
+          )
+        );
+      }
+    }
+
+    return redirect("/today");
+  } catch (error) {
+    if (error instanceof Response) {
+      throw error;
+    }
+
+    console.error("[PracticeDetailAction] Failed to complete practice", error);
+    return redirect("/today");
+  }
 }
 
 export function ErrorBoundary() {

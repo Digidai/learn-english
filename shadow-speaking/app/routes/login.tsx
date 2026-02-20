@@ -45,12 +45,12 @@ export async function action({ request, context }: Route.ActionArgs) {
     return { error: "登录尝试次数过多，请 15 分钟后再试" };
   }
 
-  // Find user
+  // Find user (single query includes onboarding_completed)
   const user = await env.DB.prepare(
-    "SELECT id, password_hash, password_salt FROM users WHERE username = ?"
+    "SELECT id, password_hash, password_salt, onboarding_completed FROM users WHERE username = ?"
   )
     .bind(username)
-    .first<{ id: string; password_hash: string; password_salt: string }>();
+    .first<{ id: string; password_hash: string; password_salt: string; onboarding_completed: number }>();
 
   if (!user) {
     await recordLoginAttempt(env.KV, username, false);
@@ -68,14 +68,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   await recordLoginAttempt(env.KV, username, true);
   const token = await createSession(env.KV, user.id);
 
-  // Check if user has completed onboarding
-  const fullUser = await env.DB.prepare(
-    "SELECT onboarding_completed FROM users WHERE id = ?"
-  )
-    .bind(user.id)
-    .first<{ onboarding_completed: number }>();
-
-  const destination = fullUser?.onboarding_completed ? "/today" : "/onboarding";
+  const destination = user.onboarding_completed ? "/today" : "/onboarding";
 
   return redirect(destination, {
     headers: {

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useLoaderData, Form, redirect, useNavigation, useNavigate } from "react-router";
+import { useState, useEffect } from "react";
+import { useLoaderData, Form, redirect, useNavigation, useNavigate, useRevalidator } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { getMaterial, getMaterialRecordings, deleteMaterial } from "../../server/db/queries";
 import { preprocessMaterial } from "../../server/services/minimax";
@@ -98,9 +98,10 @@ function safeJsonParse<T>(json: string | null, fallback: T): T {
 export default function CorpusDetailPage() {
   const { material, recordings } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
+  const revalidator = useRevalidator();
   const isSubmitting = navigation.state === "submitting";
   const submittingIntent = isSubmitting
-    ? new URLSearchParams(navigation.formData as any).get("intent")
+    ? (navigation.formData?.get("intent") as string | null)
     : null;
   const isDeleting = submittingIntent === "delete";
   const isRetrying = submittingIntent === "retry";
@@ -108,6 +109,18 @@ export default function CorpusDetailPage() {
 
   const navigate = useNavigate();
   const m = material as unknown as Material;
+
+  // Auto-poll if processing
+  useEffect(() => {
+    if (m.preprocess_status !== "pending" && m.preprocess_status !== "processing") return;
+    const interval = setInterval(() => {
+      if (revalidator.state === "idle") {
+        revalidator.revalidate();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [m.preprocess_status, revalidator]);
+
   const recs = recordings as unknown as Recording[];
 
   const tags = safeJsonParse<string[]>(m.tags, []);
@@ -182,9 +195,18 @@ export default function CorpusDetailPage() {
           </Form>
         )}
         {m.preprocess_status === "pending" && (
-          <div className="mb-4 flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
-            <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm text-blue-600">正在处理中，请稍候...</span>
+          <div className="mb-4 bg-blue-50 border border-blue-100 rounded-2xl p-5 text-center">
+            <div className="flex justify-center gap-1 mb-3">
+              {[0, 1, 2].map((i) => (
+                <div 
+                  key={i} 
+                  className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" 
+                  style={{ animationDelay: `${i * 0.15}s` }}
+                />
+              ))}
+            </div>
+            <p className="text-sm font-medium text-blue-700 mb-1">正在智能标注中...</p>
+            <p className="text-xs text-blue-500">正在生成语音和韵律标注，通常需要 30-60 秒，完成后将自动刷新。</p>
           </div>
         )}
 

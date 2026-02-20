@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Form, redirect, useLoaderData, useActionData, useNavigation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { COLD_START_PACKS, importColdStartPack } from "../../server/services/cold-start";
@@ -111,9 +111,13 @@ export default function OnboardingPage() {
   const [selectedLevel, setSelectedLevel] = useState(2);
   const [selectedMinutes, setSelectedMinutes] = useState(20);
   const [selectedPacks, setSelectedPacks] = useState<string[]>([]);
+  const lastActionDataRef = useRef<typeof actionData | null>(null);
 
   // Advance step based on action results
   useEffect(() => {
+    if (actionData === lastActionDataRef.current) return;
+    lastActionDataRef.current = actionData;
+
     if (actionData?.success && actionData.step === "level" && currentStep === 2) {
       setCurrentStep(3);
     }

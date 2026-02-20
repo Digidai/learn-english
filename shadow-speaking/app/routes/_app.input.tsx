@@ -3,7 +3,7 @@ import { Form, useActionData, useNavigation } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { isEnglish, splitSentences, stripMarkdown, checkDuplicates } from "../../server/services/preprocessor";
 import { preprocessMaterial } from "../../server/services/minimax";
-import { createMaterial } from "../../server/db/queries";
+import { createMaterialsBatch } from "../../server/db/queries";
 import type { Route } from "./+types/_app.input";
 
 export function meta() {
@@ -48,12 +48,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     };
   }
 
-  // Create materials and trigger async preprocessing
-  const materialIds: string[] = [];
-  for (const sentence of unique) {
-    const id = await createMaterial(env.DB, user.id, sentence);
-    materialIds.push(id);
-  }
+  // Create materials in a single batch for performance
+  const materialIds = await createMaterialsBatch(env.DB, user.id, unique);
 
   // Use waitUntil for async preprocessing
   const apiKey = env.MINIMAX_API_KEY;

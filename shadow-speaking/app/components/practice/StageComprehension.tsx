@@ -17,9 +17,9 @@ export function StageComprehension({
     return (
       <div className="space-y-6">
         <div className="text-center">
-          <span className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full mb-4">
+          <h2 className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full mb-4">
             阶段一 · 理解
-          </span>
+          </h2>
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -42,9 +42,9 @@ export function StageComprehension({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <span className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full mb-4">
+        <h2 className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full mb-4">
           阶段一 · 理解
-        </span>
+        </h2>
         <p className="text-sm text-gray-500">先理解这句话的含义，再开始跟读</p>
       </div>
 

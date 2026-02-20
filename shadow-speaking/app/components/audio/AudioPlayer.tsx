@@ -5,12 +5,19 @@ interface AudioPlayerProps {
   src: string;
   label?: string;
   onEnded?: () => void;
+  onError?: (error: Error) => void;
   autoPlay?: boolean;
   showCount?: boolean;
 }
 
-export function AudioPlayer({ src, label, onEnded, autoPlay, showCount }: AudioPlayerProps) {
+export function AudioPlayer({ src, label, onEnded, onError, autoPlay, showCount }: AudioPlayerProps) {
   const player = useAudioPlayer({ onEnded });
+
+  useEffect(() => {
+    if (player.hasError && onError) {
+      onError(new Error("Audio failed to load"));
+    }
+  }, [player.hasError, onError]);
 
   useEffect(() => {
     if (!src) return;

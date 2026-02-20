@@ -80,9 +80,9 @@ export function StageSyncReading({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <span className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full mb-2">
+        <h2 className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full mb-2">
           阶段三 · 同步跟读
-        </span>
+        </h2>
         <p className="text-sm text-gray-500 mb-1">{roundLabel}</p>
         <p className="text-xs text-gray-400">
           {phase === "listen"
@@ -173,7 +173,7 @@ export function StageSyncReading({
         <span className="text-xs text-gray-400 ml-1">{roundsCompleted}/2</span>
       </div>
 
-      {canComplete && (
+      {canComplete && phase === "review" && (
         <div className="space-y-2">
           <button
             onClick={onComplete}

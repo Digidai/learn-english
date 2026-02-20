@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Link, useLoaderData, Form, useNavigation, useSearchParams, useRevalidator } from "react-router";
+import { useState, useEffect, useRef } from "react";
+import { Link, useLoaderData, Form, useNavigation, useSearchParams, useRevalidator, useActionData, data as json } from "react-router";
 import { requireAuth } from "~/lib/auth.server";
 import { getTodayPlan } from "../../server/db/queries";
 import { generateDailyPlan } from "../../server/services/plan-generator";
@@ -29,7 +29,21 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     }
   }
 
-  return { plan, items, user };
+  // Check if user has ANY materials at all (to distinguish empty states)
+  const materialStats = await env.DB.prepare(
+    "SELECT COUNT(*) as total, SUM(CASE WHEN preprocess_status IN ('pending', 'processing') THEN 1 ELSE 0 END) as pending FROM materials WHERE user_id = ?"
+  ).bind(user.id).first<{ total: number; pending: number }>();
+
+  const hasAnyMaterials = (materialStats?.total || 0) > 0;
+  const hasPendingMaterials = (materialStats?.pending || 0) > 0;
+
+  return {
+    plan,
+    items,
+    user,
+    hasAnyMaterials,
+    hasPendingMaterials,
+  };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -43,19 +57,74 @@ export async function action({ request, context }: Route.ActionArgs) {
     const chinaOffset = 8 * 60 * 60 * 1000;
     const today = new Date(now.getTime() + chinaOffset).toISOString().slice(0, 10);
     const { regenerateDailyPlan } = await import("../../server/services/plan-generator");
-    await regenerateDailyPlan(env.DB, user, today);
+    const result = await regenerateDailyPlan(env.DB, user, today);
+    if (!result || ("blocked" in result && result.blocked)) {
+      const reason = result && "blocked" in result
+        ? result.reason
+        : "已有进行中的练习，无法刷新计划";
+      return json({ error: reason }, { status: 409 });
+    }
+    return json({ success: true });
   }
 
   return null;
 }
 
 export default function TodayPage() {
-  const { plan, items, user } = useLoaderData<typeof loader>();
+  const { plan, items, user, hasAnyMaterials, hasPendingMaterials } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
+  const actionData = useActionData<typeof action>();
   const isRegenerating = navigation.state === "submitting";
   const [searchParams, setSearchParams] = useSearchParams();
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
+  const regenDialogRef = useRef<HTMLDivElement>(null);
   const notice = searchParams.get("notice");
+
+  // Focus trap + Escape for regen dialog
+  useEffect(() => {
+    if (!showRegenConfirm) return;
+    const dialog = regenDialogRef.current;
+    if (!dialog) return;
+
+    const focusableButtons = dialog.querySelectorAll<HTMLButtonElement>("button");
+    if (focusableButtons.length === 0) return;
+    (focusableButtons[0] as HTMLButtonElement).focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowRegenConfirm(false);
+        return;
+      }
+      if (e.key === "Tab") {
+        const first = focusableButtons[0];
+        const last = focusableButtons[focusableButtons.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [showRegenConfirm]);
+
+  const [showErrorToast, setShowErrorToast] = useState(false);
+  const errorMessage = actionData && "error" in actionData ? actionData.error : null;
+  useEffect(() => {
+    if (errorMessage) {
+      setShowErrorToast(true);
+      const timer = setTimeout(() => setShowErrorToast(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorMessage]);
 
   const revalidator = useRevalidator();
   const u = user as unknown as { streak_days: number; total_practice_days: number };
@@ -73,31 +142,48 @@ export default function TodayPage() {
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
   const allDone = completedCount === totalCount && totalCount > 0;
   const hasStartedItems = typedItems.some((i) => i.status !== "pending");
-  const hasPendingPreprocess = typedItems.some((i) => i.preprocess_status === "pending");
+  const hasPendingPreprocess = typedItems.some((i) => i.preprocess_status === "pending" || i.preprocess_status === "processing");
+  const shouldPoll = hasPendingPreprocess || hasPendingMaterials;
 
-  // Auto-poll every 5 seconds when there are items still being preprocessed
+  // Auto-poll every 5 seconds when there are items still being preprocessed or materials pending
   useEffect(() => {
-    if (!hasPendingPreprocess) return;
+    if (!shouldPoll) return;
     const interval = setInterval(() => {
       if (revalidator.state === "idle") {
         revalidator.revalidate();
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [hasPendingPreprocess, revalidator]);
+  }, [shouldPoll, revalidator.state]);
 
   if (!plan || items.length === 0) {
+    if (hasPendingMaterials) {
+      return (
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">今日练习</h1>
+          <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
+            <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-8 h-8 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">语料正在处理中...</h2>
+            <p className="text-gray-500 mb-4">首批语料正在生成语音和韵律标注，请稍等几分钟片刻，系统将自动刷新。</p>
+            <div className="text-xs text-gray-400">处理完成后会自动为你开启今日计划</div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">今日练习</h1>
         <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
           <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-blue-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
           </div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">暂无练习计划</h2>
-          <p className="text-gray-500 mb-4">添加素材后，系统会自动为你编排每日练习</p>
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">{hasAnyMaterials ? "正在努力编排中" : "还没有语料"}</h2>
+          <p className="text-gray-500 mb-4">{hasAnyMaterials ? "系统正在根据你的等级编排最合适的练习..." : "添加素材后，系统会自动为你编排每日练习"}</p>
           <Link
             to="/input"
             className="inline-block px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
@@ -138,6 +224,16 @@ export default function TodayPage() {
 
   return (
     <div>
+      {/* Error toast */}
+      {showErrorToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-fadeIn">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+          </svg>
+          <span className="text-sm font-medium">{errorMessage}</span>
+        </div>
+      )}
+
       {/* Toast notice */}
       {notice === "completed" && (
         <div className="mb-4 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
@@ -277,7 +373,7 @@ export default function TodayPage() {
       {/* Regenerate confirmation modal */}
       {showRegenConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4" role="dialog" aria-modal="true">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
+          <div ref={regenDialogRef} className="bg-white rounded-2xl p-6 max-w-sm w-full">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">刷新计划？</h3>
             <p className="text-sm text-gray-500 mb-6">
               {hasStartedItems

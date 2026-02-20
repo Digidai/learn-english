@@ -23,6 +23,10 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(handleDailyPlanCron(env));
+    ctx.waitUntil(
+      handleDailyPlanCron(env).catch((error) => {
+        console.error("[Cron] Unhandled error in daily plan cron:", error);
+      })
+    );
   },
 } satisfies ExportedHandler<Env>;

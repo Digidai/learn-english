@@ -34,23 +34,63 @@ export function StageShadowing({
   const [showRetryPrompt, setShowRetryPrompt] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
   const [shadowingActive, setShadowingActive] = useState(false);
+  const [autoStopCountdown, setAutoStopCountdown] = useState<number | null>(null);
   const silenceDetection = useSilenceDetection();
   const silenceRef = useRef(silenceDetection);
   silenceRef.current = silenceDetection;
 
+  const handleRecordingComplete = (blob: Blob) => {
+    const key = `stage4-round${round}-${Date.now()}`;
+    onRecording(key, blob);
+
+    // Stop silence monitoring and check result
+    const result = silenceDetection.stopMonitoring();
+
+    const newCompleted = [...roundsCompleted, round];
+    setRoundsCompleted(newCompleted);
+    setShowOriginal(true);
+
+    if (result.hasLongSilence) {
+      onLongSilence();
+      if (round === 3) {
+        setShowRetryPrompt(true);
+      }
+    }
+  };
+
+  const handleRecordingCompleteRef = useRef(handleRecordingComplete);
+  handleRecordingCompleteRef.current = handleRecordingComplete;
+
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Unified audio player + recorder for simultaneous play+record
   const player = useAudioPlayer({
     onEnded: () => {
-      // Audio ended — auto-stop recording after a short delay
+      // Audio ended — start 4s countdown to auto-stop recording
+      setAutoStopCountdown(4);
+      countdownIntervalRef.current = setInterval(() => {
+        setAutoStopCountdown((prev) => {
+          if (prev === null || prev <= 1) {
+            if (countdownIntervalRef.current) {
+              clearInterval(countdownIntervalRef.current);
+              countdownIntervalRef.current = null;
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
       autoStopTimerRef.current = setTimeout(async () => {
         if (recorderRef.current.isRecording) {
           const result = await recorder.stopRecording();
           if (result) {
-            handleRecordingComplete(result.blob);
+            handleRecordingCompleteRef.current(result.blob);
           }
         }
         setShadowingActive(false);
-      }, 2000);
+        setAutoStopCountdown(null);
+      }, 4000);
     },
   });
   const recorder = useAudioRecorder({
@@ -66,6 +106,7 @@ export function StageShadowing({
   useEffect(() => {
     return () => {
       if (autoStopTimerRef.current) clearTimeout(autoStopTimerRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
     };
   }, []);
 
@@ -162,33 +203,19 @@ export function StageShadowing({
       clearTimeout(autoStopTimerRef.current);
       autoStopTimerRef.current = null;
     }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
     player.pause();
     navigator.vibrate?.(50);
     const result = await recorder.stopRecording();
     if (result) {
-      handleRecordingComplete(result.blob);
+      handleRecordingCompleteRef.current(result.blob);
     }
     setShadowingActive(false);
+    setAutoStopCountdown(null);
   }, [recorder, player]);
-
-  const handleRecordingComplete = (blob: Blob) => {
-    const key = `stage4-round${round}-${Date.now()}`;
-    onRecording(key, blob);
-
-    // Stop silence monitoring and check result
-    const result = silenceDetection.stopMonitoring();
-
-    const newCompleted = [...roundsCompleted, round];
-    setRoundsCompleted(newCompleted);
-    setShowOriginal(true);
-
-    if (result.hasLongSilence) {
-      onLongSilence();
-      if (round === 3) {
-        setShowRetryPrompt(true);
-      }
-    }
-  };
 
   const handleNext = () => {
     setShowOriginal(false);
@@ -207,9 +234,9 @@ export function StageShadowing({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <span className="inline-block px-3 py-1 bg-purple-50 text-purple-600 text-xs font-medium rounded-full mb-2">
+        <h2 className="inline-block px-3 py-1 bg-purple-50 text-purple-600 text-xs font-medium rounded-full mb-2">
           阶段四 · 影子跟读
-        </span>
+        </h2>
         <p className="text-sm font-medium text-gray-700 mb-1">{info.title}</p>
         <p className="text-xs text-gray-400">{info.hint}</p>
       </div>
@@ -253,7 +280,11 @@ export function StageShadowing({
                 停止跟读
               </button>
               {!player.isPlaying && (
-                <p className="text-xs text-amber-600">音频已结束，可以继续说完或点击停止</p>
+                <p className="text-xs text-amber-600">
+                  {autoStopCountdown !== null
+                    ? `还有 ${autoStopCountdown} 秒自动停止`
+                    : "音频已结束，可以继续说完或点击停止"}
+                </p>
               )}
             </>
           ) : (

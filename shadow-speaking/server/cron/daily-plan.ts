@@ -11,9 +11,12 @@ export async function handleDailyPlanCron(env: Env): Promise<void> {
   console.log(`[Cron] Generating daily plans for ${planDate}`);
 
   // Recovery: reset materials stuck in 'processing' for > 5 minutes back to 'pending'
+  // Use current time minus 5 minutes as threshold (created_at is always older than processing start)
   const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
   const stuckReset = await env.DB.prepare(
-    "UPDATE materials SET preprocess_status = 'pending' WHERE preprocess_status = 'processing' AND created_at < ?"
+    `UPDATE materials SET preprocess_status = 'pending'
+     WHERE preprocess_status = 'processing'
+     AND datetime(created_at) < datetime(?)`
   ).bind(fiveMinutesAgo).run();
   if (stuckReset.meta.changes > 0) {
     console.log(`[Cron] Reset ${stuckReset.meta.changes} stuck processing materials`);

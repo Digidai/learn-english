@@ -137,6 +137,17 @@ export async function deleteMaterial(
     .bind(materialId)
     .all<{ r2_key: string }>();
 
+  // Track how many plan items (total and completed) will be removed per plan
+  const planItemCounts = await db
+    .prepare(
+      `SELECT plan_id,
+              COUNT(*) as total_count,
+              SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count
+       FROM plan_items WHERE material_id = ? GROUP BY plan_id`
+    )
+    .bind(materialId)
+    .all<{ plan_id: string; total_count: number; completed_count: number }>();
+
   // Delete R2 objects (audio files + recordings)
   const r2Keys = [
     material.audio_slow_key,
@@ -150,12 +161,25 @@ export async function deleteMaterial(
   }
 
   // Cascade delete dependent rows + material in a batch
-  await db.batch([
+  const statements: D1PreparedStatement[] = planItemCounts.results.map(({ plan_id, total_count, completed_count }) =>
+    db
+      .prepare(
+        `UPDATE daily_plans
+         SET total_items = CASE WHEN total_items >= ? THEN total_items - ? ELSE 0 END,
+             completed_items = CASE WHEN completed_items >= ? THEN completed_items - ? ELSE 0 END
+         WHERE id = ?`
+      )
+      .bind(total_count, total_count, completed_count, completed_count, plan_id)
+  );
+
+  statements.push(
     db.prepare("DELETE FROM recordings WHERE material_id = ?").bind(materialId),
     db.prepare("DELETE FROM practice_records WHERE material_id = ?").bind(materialId),
     db.prepare("DELETE FROM plan_items WHERE material_id = ?").bind(materialId),
-    db.prepare("DELETE FROM materials WHERE id = ? AND user_id = ?").bind(materialId, userId),
-  ]);
+    db.prepare("DELETE FROM materials WHERE id = ? AND user_id = ?").bind(materialId, userId)
+  );
+
+  await db.batch(statements);
 
   return true;
 }

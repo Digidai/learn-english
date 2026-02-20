@@ -53,13 +53,16 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
   // Handle range response
   if (rangeRequest && object.range) {
-    const r = object.range as { offset: number; length: number };
-    headers.set(
-      "Content-Range",
-      `bytes ${r.offset}-${r.offset + r.length - 1}/${object.size}`
-    );
-    headers.set("Content-Length", String(r.length));
-    return new Response(object.body, { status: 206, headers });
+    const r = object.range as { offset: number; length?: number };
+    const length = r.length ?? (object.size - r.offset);
+    if (length > 0) {
+      headers.set(
+        "Content-Range",
+        `bytes ${r.offset}-${r.offset + length - 1}/${object.size}`
+      );
+      headers.set("Content-Length", String(length));
+      return new Response(object.body, { status: 206, headers });
+    }
   }
 
   return new Response(object.body, { headers });

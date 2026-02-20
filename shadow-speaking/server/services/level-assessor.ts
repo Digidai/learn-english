@@ -40,7 +40,7 @@ export async function checkLevelProgression(
   const totalItems = recentPlans.results.reduce((s, p) => s + p.total_items, 0);
   const completionRate = totalItems > 0 ? totalCompleted / totalItems : 0;
 
-  if (completionRate <= 0.8) {
+  if (completionRate < 0.8) {
     return { shouldUpgrade: false, inObservation: false };
   }
 

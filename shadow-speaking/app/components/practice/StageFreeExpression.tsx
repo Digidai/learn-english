@@ -22,7 +22,7 @@ export function StageFreeExpression({
   const [hasRecorded, setHasRecorded] = useState(false);
 
   const handleRecordingComplete = (blob: Blob) => {
-    const key = `stage6-${Date.now()}`;
+    const key = "stage6";
     onRecording(key, blob);
     setHasRecorded(true);
   };
@@ -30,9 +30,9 @@ export function StageFreeExpression({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <span className="inline-block px-3 py-1 bg-green-50 text-green-600 text-xs font-medium rounded-full mb-2">
+        <h2 className="inline-block px-3 py-1 bg-green-50 text-green-600 text-xs font-medium rounded-full mb-2">
           阶段六 · 自由表达
-        </span>
+        </h2>
         <p className="text-sm text-gray-500">
           用自己的话表达相似的意思
         </p>
@@ -78,12 +78,20 @@ export function StageFreeExpression({
 
       {/* Complete button */}
       {hasRecorded && (
-        <button
-          onClick={onComplete}
-          className="w-full py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 transition-colors"
-        >
-          完成本条练习
-        </button>
+        <div className="space-y-3">
+          <button
+            onClick={onComplete}
+            className="w-full py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 transition-colors shadow-lg shadow-green-100"
+          >
+            完成本条练习
+          </button>
+          <button
+            onClick={() => setHasRecorded(false)}
+            className="w-full py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            重新录音
+          </button>
+        </div>
       )}
     </div>
   );

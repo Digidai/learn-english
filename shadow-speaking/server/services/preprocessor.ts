@@ -33,9 +33,10 @@ export function stripMarkdown(text: string): string {
   // 8. Remove leading bullet/dash marker: "- item" → "item"
   cleaned = cleaned.replace(/^\s*[-*+]\s+/, "").trim();
 
-  // 9. Remove leading source-label-like tokens (domain patterns with dots/hyphens)
-  //    e.g. "openjobs-ai", "openjobs-ai.gitbook", "the-vision-debugged.beehiiv"
-  cleaned = cleaned.replace(/^[a-z0-9]+(?:[-._][a-z0-9]+)+\s+/i, "").trim();
+  // 9. Remove leading source-label-like tokens (domain patterns with dots)
+  //    e.g. "openjobs-ai.gitbook", "the-vision-debugged.beehiiv"
+  //    Must contain at least one dot to avoid stripping valid hyphenated words like "well-known"
+  cleaned = cleaned.replace(/^[a-z0-9]+(?:[-_][a-z0-9]+)*(?:\.[a-z0-9]+(?:[-_][a-z0-9]+)*)+\s+/i, "").trim();
 
   // 10. After removing source label, there might be another "## " or "- "
   cleaned = cleaned.replace(/^#{1,6}\s+/, "").trim();

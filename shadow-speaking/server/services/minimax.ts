@@ -295,11 +295,23 @@ export async function preprocessMaterial(
     const cleanText = stripMarkdown(sentence);
     const wordCount = cleanText.split(/\s+/).filter(Boolean).length;
     if (cleanText.length < 5 || wordCount < 3) {
-      // Not a valid sentence — mark as failed with reason, delete the material
-      await db
-        .prepare("DELETE FROM materials WHERE id = ?")
-        .bind(materialId)
-        .run();
+      // Not a valid sentence — update daily_plan counters, cascade-delete, then the material
+      const planItemCounts = await db.prepare(
+        `SELECT plan_id, COUNT(*) as cnt FROM plan_items WHERE material_id = ? GROUP BY plan_id`
+      ).bind(materialId).all<{ plan_id: string; cnt: number }>();
+
+      const statements: D1PreparedStatement[] = planItemCounts.results.map(({ plan_id, cnt }) =>
+        db.prepare(
+          `UPDATE daily_plans SET total_items = CASE WHEN total_items >= ? THEN total_items - ? ELSE 0 END WHERE id = ?`
+        ).bind(cnt, cnt, plan_id)
+      );
+      statements.push(
+        db.prepare("DELETE FROM plan_items WHERE material_id = ?").bind(materialId),
+        db.prepare("DELETE FROM recordings WHERE material_id = ?").bind(materialId),
+        db.prepare("DELETE FROM practice_records WHERE material_id = ?").bind(materialId),
+        db.prepare("DELETE FROM materials WHERE id = ?").bind(materialId),
+      );
+      await db.batch(statements);
       return; // Skip silently — content was just a source label
     }
 

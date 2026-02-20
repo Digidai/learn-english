@@ -11,9 +11,10 @@ export function StageListening({ content, audioNormalSrc, onComplete }: Props) {
   const [playCount, setPlayCount] = useState(0);
   const [showWarning, setShowWarning] = useState(false);
   const [warningShown, setWarningShown] = useState(false);
+  const [hasError, setHasError] = useState(false);
 
   const handleReady = () => {
-    if (playCount <= 1 && !warningShown) {
+    if (playCount <= 1 && !warningShown && !hasError) {
       setShowWarning(true);
       setWarningShown(true);
     } else {
@@ -24,9 +25,9 @@ export function StageListening({ content, audioNormalSrc, onComplete }: Props) {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <span className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full mb-4">
+        <h2 className="inline-block px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full mb-4">
           阶段二 · 精听
-        </span>
+        </h2>
         <p className="text-sm text-gray-500">
           仔细听音频，注意语速、语调和节奏，不需要出声
         </p>
@@ -45,11 +46,28 @@ export function StageListening({ content, audioNormalSrc, onComplete }: Props) {
         label="常速音频"
         showCount
         onEnded={() => setPlayCount((c) => c + 1)}
+        onError={() => setHasError(true)}
       />
 
-      <p className="text-center text-sm text-gray-400">
-        已听 {playCount} 遍
-      </p>
+      {hasError && (
+        <div className="bg-red-50 border border-red-100 rounded-xl p-4">
+          <p className="text-sm text-red-600 mb-2 text-center">
+            音频播放器遇到一点问题
+          </p>
+          <button
+            onClick={onComplete}
+            className="w-full py-2 bg-white text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"
+          >
+            跳过此阶段，继续练习
+          </button>
+        </div>
+      )}
+
+      {!hasError && (
+        <p className="text-center text-sm text-gray-400">
+          已听 {playCount} 遍
+        </p>
+      )}
 
       {/* Warning modal */}
       {showWarning && (

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AudioPlayer } from "~/components/audio/AudioPlayer";
 import { AudioRecorder } from "~/components/audio/AudioRecorder";
 
@@ -20,10 +20,13 @@ export function StageReproduction({
   onComplete,
 }: Props) {
   const [hasRecorded, setHasRecorded] = useState(false);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
   const [selectedRating, setSelectedRating] = useState<string | null>(null);
 
   const handleRecordingComplete = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    setRecordingUrl(url);
     const key = `stage5-${Date.now()}`;
     onRecording(key, blob);
     setHasRecorded(true);
@@ -35,18 +38,27 @@ export function StageReproduction({
     onSelfRating(rating);
   };
 
+  // Revoke blob URL on unmount to prevent memory leak
+  useEffect(() => {
+    return () => {
+      if (recordingUrl) URL.revokeObjectURL(recordingUrl);
+    };
+  }, [recordingUrl]);
+
   const handleRetry = () => {
+    if (recordingUrl) URL.revokeObjectURL(recordingUrl);
     setHasRecorded(false);
     setShowOriginal(false);
     setSelectedRating(null);
+    setRecordingUrl(null);
   };
 
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <span className="inline-block px-3 py-1 bg-orange-50 text-orange-600 text-xs font-medium rounded-full mb-2">
+        <h2 className="inline-block px-3 py-1 bg-orange-50 text-orange-600 text-xs font-medium rounded-full mb-2">
           阶段五 · 脱稿复述
-        </span>
+        </h2>
         <p className="text-sm text-gray-500">
           凭记忆用英文说出这句话
         </p>
@@ -75,6 +87,11 @@ export function StageReproduction({
             <p className="text-xs text-blue-500 mb-1">原文</p>
             <p className="text-lg font-medium text-gray-900">{content}</p>
           </div>
+
+          {/* User's recording playback */}
+          {recordingUrl && (
+            <AudioPlayer src={recordingUrl} label="你的录音" />
+          )}
 
           {/* Play original audio */}
           <AudioPlayer
