@@ -122,7 +122,7 @@ function getClient(apiKey: string): OpenAI {
   }
   const client = new OpenAI({
     apiKey,
-    baseURL: "https://api.minimax.io/v1",
+    baseURL: "https://api.minimaxi.com/v1",
   });
   cachedClient = { key: apiKey, client };
   return client;
@@ -176,7 +176,7 @@ Rules for word_mask:
             function: { name: "analyze_sentence" },
           },
         },
-        { signal: AbortSignal.timeout(15000) }
+        { signal: AbortSignal.timeout(30000) }
       );
       break;
     } catch (err) {
@@ -218,8 +218,7 @@ Rules for word_mask:
 // --- TTS Audio Generation ---
 
 export interface TTSResult {
-  audioStream: ReadableStream;
-  contentType: string;
+  audioUrl: string;
 }
 
 export async function generateTTS(
@@ -228,7 +227,7 @@ export async function generateTTS(
   speed: number
 ): Promise<TTSResult> {
   const response = await fetchWithRetry(
-    "https://api.minimax.io/v1/audio/synthesis",
+    "https://api.minimaxi.com/v1/t2a_v2",
     {
       method: "POST",
       headers: {
@@ -238,12 +237,15 @@ export async function generateTTS(
       body: JSON.stringify({
         model: "speech-02-turbo",
         text,
-        voice_id: "English_FriendlyPerson",
-        speed,
-        output_format: "mp3",
+        voice_setting: {
+          voice_id: "English_FriendlyPerson",
+          speed,
+        },
+        stream: false,
+        output_format: "url",
         sample_rate: 32000,
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(30000),
     }
   );
 
@@ -252,19 +254,20 @@ export async function generateTTS(
     throw new Error(`TTS API error (${response.status}): ${errorText}`);
   }
 
-  const contentType = response.headers.get("Content-Type") || "audio/mpeg";
+  const data = await response.json() as {
+    data?: { audio?: string };
+    base_resp?: { status_code: number; status_msg: string };
+  };
 
-  // Check if response is JSON (error) or audio
-  if (contentType.includes("application/json")) {
-    const errorData = await response.json();
-    throw new Error(`TTS API returned error: ${JSON.stringify(errorData)}`);
+  if (data.base_resp?.status_code !== 0) {
+    throw new Error(`TTS API error: ${data.base_resp?.status_msg || "unknown"}`);
   }
 
-  if (!response.body) {
-    throw new Error("TTS API returned empty body");
+  if (!data.data?.audio) {
+    throw new Error("TTS API returned no audio URL");
   }
 
-  return { audioStream: response.body, contentType: "audio/mpeg" };
+  return { audioUrl: data.data.audio };
 }
 
 // --- Full Preprocessing Pipeline ---
@@ -336,9 +339,13 @@ export async function preprocessMaterial(
     await Promise.all(
       speeds.map(async ({ speed, key }) => {
         const tts = await generateTTS(apiKey, cleanText, speed);
-        // Stream directly to R2 — avoids buffering entire file in memory
-        await r2.put(key, tts.audioStream, {
-          httpMetadata: { contentType: tts.contentType },
+        // Download audio from temporary URL and store in R2
+        const audioResponse = await fetch(tts.audioUrl);
+        if (!audioResponse.ok || !audioResponse.body) {
+          throw new Error(`Failed to download TTS audio: ${audioResponse.status}`);
+        }
+        await r2.put(key, audioResponse.body, {
+          httpMetadata: { contentType: "audio/mpeg" },
         });
       })
     );

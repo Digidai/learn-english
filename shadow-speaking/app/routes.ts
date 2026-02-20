@@ -26,4 +26,5 @@ export default [
 
   // API routes
   route("api/audio/:key", "routes/api.audio.tsx"),
+  route("api/retry-preprocess", "routes/api.retry-preprocess.tsx"),
 ] satisfies RouteConfig;

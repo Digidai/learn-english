@@ -3,6 +3,7 @@ import { Link, useLoaderData, Form, useNavigation, useSearchParams, useRevalidat
 import { requireAuth } from "~/lib/auth.server";
 import { getTodayPlan } from "../../server/db/queries";
 import { generateDailyPlan } from "../../server/services/plan-generator";
+import { preprocessMaterial } from "../../server/services/minimax";
 import type { Route } from "./+types/_app.today";
 
 export function meta() {
@@ -31,11 +32,41 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   // Check if user has ANY materials at all (to distinguish empty states)
   const materialStats = await env.DB.prepare(
-    "SELECT COUNT(*) as total, SUM(CASE WHEN preprocess_status IN ('pending', 'processing') THEN 1 ELSE 0 END) as pending FROM materials WHERE user_id = ?"
+    "SELECT COUNT(*) as total, SUM(CASE WHEN preprocess_status != 'done' THEN 1 ELSE 0 END) as pending FROM materials WHERE user_id = ?"
   ).bind(user.id).first<{ total: number; pending: number }>();
 
   const hasAnyMaterials = (materialStats?.total || 0) > 0;
   const hasPendingMaterials = (materialStats?.pending || 0) > 0;
+
+  // Auto-retry stale pending/failed materials that were never processed
+  if (hasPendingMaterials) {
+    const apiKey = env.MINIMAX_API_KEY;
+    if (apiKey) {
+      const oneMinAgo = new Date(now.getTime() - 60_000).toISOString();
+      const staleMaterials = await env.DB.prepare(
+        `SELECT id, content FROM materials
+         WHERE user_id = ? AND preprocess_status IN ('pending', 'failed')
+         AND created_at < ?
+         LIMIT 15`
+      ).bind(user.id, oneMinAgo).all<{ id: string; content: string }>();
+
+      if (staleMaterials.results.length > 0) {
+        context.cloudflare.ctx.waitUntil(
+          (async () => {
+            const BATCH_SIZE = 3;
+            for (let i = 0; i < staleMaterials.results.length; i += BATCH_SIZE) {
+              const batch = staleMaterials.results.slice(i, i + BATCH_SIZE);
+              await Promise.allSettled(
+                batch.map((m) =>
+                  preprocessMaterial(apiKey, m.content, m.id, user.id, env.DB, env.R2)
+                )
+              );
+            }
+          })()
+        );
+      }
+    }
+  }
 
   return {
     plan,
