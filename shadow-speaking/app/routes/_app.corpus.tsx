@@ -99,6 +99,17 @@ export default function CorpusPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const isRetrying = navigation.formData?.get("intent") === "retry-all-failed";
+  const typedMaterials = materials as Array<{
+    id: string;
+    content: string;
+    translation: string | null;
+    status: string;
+    level: number;
+    tags: string;
+    preprocess_status: string;
+  }>;
+  const hasActiveFilters = Boolean(filters.status || filters.level || filters.search);
+  const hasFilteredEmpty = typedMaterials.length === 0 && hasActiveFilters;
 
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -121,8 +132,24 @@ export default function CorpusPage() {
     } else {
       params.delete(key);
     }
-    params.delete("page");
+    if (key !== "page") {
+      params.delete("page");
+    }
     setSearchParams(params);
+  };
+
+  const setPage = (nextPage: number) => {
+    const params = new URLSearchParams(searchParams);
+    if (nextPage <= 1) {
+      params.delete("page");
+    } else {
+      params.set("page", String(nextPage));
+    }
+    setSearchParams(params);
+  };
+
+  const clearFilters = () => {
+    setSearchParams(new URLSearchParams());
   };
 
   if (total === 0 && !filters.status && !filters.level && !filters.search) {
@@ -226,17 +253,23 @@ export default function CorpusPage() {
       {/* Count */}
       <p className="text-sm text-gray-400 mb-3">{total} 条语料</p>
 
+      {hasFilteredEmpty && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center mb-4">
+          <p className="text-sm text-gray-600 mb-3">当前筛选条件下没有语料</p>
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            清除筛选
+          </button>
+        </div>
+      )}
+
       {/* Material list */}
-      <div className="space-y-3">
-        {(materials as Array<{
-          id: string;
-          content: string;
-          translation: string | null;
-          status: string;
-          level: number;
-          tags: string;
-          preprocess_status: string;
-        }>).map((material) => {
+      {!hasFilteredEmpty && (
+        <div className="space-y-3">
+          {typedMaterials.map((material) => {
           let tags: string[] = [];
           try { tags = material.tags ? JSON.parse(material.tags) : []; } catch { /* ignore */ }
           const statusColors: Record<string, string> = {
@@ -282,14 +315,15 @@ export default function CorpusPage() {
             </Link>
           );
         })}
-      </div>
+        </div>
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2 mt-6">
           {page > 1 && (
             <button
-              onClick={() => setFilter("page", String(page - 1))}
+              onClick={() => setPage(page - 1)}
               className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
             >
               上一页
@@ -300,7 +334,7 @@ export default function CorpusPage() {
           </span>
           {page < totalPages && (
             <button
-              onClick={() => setFilter("page", String(page + 1))}
+              onClick={() => setPage(page + 1)}
               className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
             >
               下一页

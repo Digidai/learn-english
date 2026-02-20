@@ -26,6 +26,7 @@ export function StageSyncReading({
   const [extraRounds, setExtraRounds] = useState(0);
   const [phase, setPhase] = useState<Phase>("listen");
   const [silentWarning, setSilentWarning] = useState(false);
+  const [audioLoadFailed, setAudioLoadFailed] = useState(false);
 
   const words = content.split(" ");
   const displayContent = words.map((word, i) => {
@@ -45,6 +46,13 @@ export function StageSyncReading({
 
   const handleAudioEnded = useCallback(() => {
     // Audio finished → switch to record phase
+    setAudioLoadFailed(false);
+    setPhase("record");
+  }, []);
+
+  const handleAudioError = useCallback(() => {
+    // Fallback: don't block the whole stage when audio fails.
+    setAudioLoadFailed(true);
     setPhase("record");
   }, []);
 
@@ -56,7 +64,7 @@ export function StageSyncReading({
     }
 
     setSilentWarning(false);
-    const key = `stage3-round${round}-${Date.now()}`;
+    const key = `stage3-round${roundsCompleted + 1}`;
     onRecording(key, blob);
 
     const newCompleted = roundsCompleted + 1;
@@ -72,6 +80,7 @@ export function StageSyncReading({
   const handleNextRound = () => {
     setPhase("listen");
     setSilentWarning(false);
+    setAudioLoadFailed(false);
   };
 
   const canComplete = roundsCompleted >= 2;
@@ -107,6 +116,7 @@ export function StageSyncReading({
             src={currentAudio}
             label={round === 1 ? "慢速 0.75x" : "常速 1.0x"}
             onEnded={handleAudioEnded}
+            onError={handleAudioError}
             autoPlay
           />
           <div className="bg-blue-50 rounded-xl p-3">
@@ -120,6 +130,13 @@ export function StageSyncReading({
       {/* Record phase: recorder */}
       {phase === "record" && (
         <>
+          {audioLoadFailed && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+              <p className="text-xs text-amber-700 text-center">
+                音频加载失败，已自动切换到录音模式，可继续练习
+              </p>
+            </div>
+          )}
           <div className="bg-amber-50 rounded-xl p-3">
             <p className="text-xs text-amber-600 text-center">
               看着文本，大声朗读出来

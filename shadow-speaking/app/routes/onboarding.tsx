@@ -129,6 +129,7 @@ export default function OnboardingPage() {
   const [selectedLevel, setSelectedLevel] = useState(2);
   const [selectedMinutes, setSelectedMinutes] = useState(20);
   const [selectedPacks, setSelectedPacks] = useState<string[]>([]);
+  const [packLimitNotice, setPackLimitNotice] = useState<string | null>(null);
   const lastActionDataRef = useRef<typeof actionData | null>(null);
   const actionError = actionData && typeof actionData === "object" && "error" in actionData
     ? String(actionData.error)
@@ -149,6 +150,12 @@ export default function OnboardingPage() {
       setCurrentStep(5);
     }
   }, [actionData, currentStep]);
+
+  useEffect(() => {
+    if (!packLimitNotice) return;
+    const timer = setTimeout(() => setPackLimitNotice(null), 2500);
+    return () => clearTimeout(timer);
+  }, [packLimitNotice]);
 
   const steps = [
     { num: 1, label: "欢迎" },
@@ -317,24 +324,38 @@ export default function OnboardingPage() {
               选择 1-3 个感兴趣的主题，快速开始练习
             </p>
 
+            {packLimitNotice && (
+              <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <p className="text-sm text-amber-700">{packLimitNotice}</p>
+              </div>
+            )}
+
             <div className="space-y-3 mb-6">
               {(packs as Array<{ id: string; name: string; description: string; count: number }>).map((pack) => {
                 const isSelected = selectedPacks.includes(pack.id);
+                const isLocked = !isSelected && selectedPacks.length >= 3;
                 return (
                   <button
                     key={pack.id}
                     onClick={() => {
-                      setSelectedPacks((prev) =>
-                        isSelected
-                          ? prev.filter((p) => p !== pack.id)
-                          : prev.length < 3
-                          ? [...prev, pack.id]
-                          : prev
-                      );
+                      setSelectedPacks((prev) => {
+                        if (isSelected) {
+                          setPackLimitNotice(null);
+                          return prev.filter((p) => p !== pack.id);
+                        }
+                        if (prev.length >= 3) {
+                          setPackLimitNotice("最多只能选择 3 个语料包");
+                          return prev;
+                        }
+                        setPackLimitNotice(null);
+                        return [...prev, pack.id];
+                      });
                     }}
                     className={`w-full text-left p-4 rounded-xl border transition-colors ${
                       isSelected
                         ? "border-blue-500 bg-blue-50"
+                        : isLocked
+                        ? "border-gray-200 bg-gray-50 text-gray-400"
                         : "border-gray-200 hover:border-gray-300"
                     }`}
                   >
@@ -343,7 +364,9 @@ export default function OnboardingPage() {
                         <p className="font-medium text-gray-900">{pack.name}</p>
                         <p className="text-sm text-gray-500">{pack.description}</p>
                       </div>
-                      <span className="text-xs text-gray-400">{pack.count} 条</span>
+                      <span className="text-xs text-gray-400">
+                        {isLocked ? "已达上限" : `${pack.count} 条`}
+                      </span>
                     </div>
                   </button>
                 );

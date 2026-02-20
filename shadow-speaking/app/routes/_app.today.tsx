@@ -106,7 +106,10 @@ export async function action({ request, context }: Route.ActionArgs) {
 export default function TodayPage() {
   const { plan, items, user, hasAnyMaterials, hasPendingMaterials } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
-  const actionData = useActionData<typeof action>();
+  const actionData = useActionData<typeof action>() as
+    | { error?: string; success?: boolean }
+    | undefined;
+  const revalidator = useRevalidator();
   const isRegenerating = navigation.state === "submitting";
   const [searchParams, setSearchParams] = useSearchParams();
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
@@ -150,7 +153,10 @@ export default function TodayPage() {
   }, [showRegenConfirm]);
 
   const [showErrorToast, setShowErrorToast] = useState(false);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
   const errorMessage = actionData && "error" in actionData ? actionData.error : null;
+  const successMessage = actionData?.success ? "计划已刷新" : null;
+
   useEffect(() => {
     if (errorMessage) {
       setShowErrorToast(true);
@@ -159,7 +165,14 @@ export default function TodayPage() {
     }
   }, [errorMessage]);
 
-  const revalidator = useRevalidator();
+  useEffect(() => {
+    if (!successMessage) return;
+    revalidator.revalidate();
+    setShowSuccessToast(true);
+    const timer = setTimeout(() => setShowSuccessToast(false), 2500);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
+
   const u = user as unknown as { streak_days: number; total_practice_days: number };
 
   const typedItems = items as Array<{
@@ -267,6 +280,16 @@ export default function TodayPage() {
         </div>
       )}
 
+      {/* Success toast */}
+      {showSuccessToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-fadeIn">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+          </svg>
+          <span className="text-sm font-medium">{successMessage}</span>
+        </div>
+      )}
+
       {/* Toast notice */}
       {notice === "completed" && (
         <div className="mb-4 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
@@ -297,8 +320,13 @@ export default function TodayPage() {
         <button
           type="button"
           onClick={() => setShowRegenConfirm(true)}
-          disabled={isRegenerating}
-          className="text-sm text-blue-600 hover:text-blue-700 disabled:opacity-50"
+          disabled={isRegenerating || hasStartedItems}
+          title={hasStartedItems ? "已有进行中的练习，暂不能刷新计划" : undefined}
+          className={`text-sm disabled:opacity-50 ${
+            hasStartedItems
+              ? "text-gray-400 cursor-not-allowed"
+              : "text-blue-600 hover:text-blue-700"
+          }`}
         >
           刷新计划
         </button>

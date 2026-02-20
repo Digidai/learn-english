@@ -118,7 +118,7 @@ export default function InputPage() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             className="w-full h-40 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-gray-900 placeholder-gray-400"
-            placeholder="Type or paste English text here..."
+            placeholder="在这里输入或粘贴英文句子/段落..."
             disabled={isSubmitting}
           />
           <p className={`text-xs text-right mt-1 ${text.length > 4500 ? "text-red-500" : "text-gray-400"}`}>

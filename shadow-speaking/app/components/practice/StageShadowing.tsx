@@ -40,7 +40,7 @@ export function StageShadowing({
   silenceRef.current = silenceDetection;
 
   const handleRecordingComplete = (blob: Blob) => {
-    const key = `stage4-round${round}-${Date.now()}`;
+    const key = `stage4-round${round}`;
     onRecording(key, blob);
 
     // Stop silence monitoring and check result

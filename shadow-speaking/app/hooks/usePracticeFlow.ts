@@ -118,7 +118,7 @@ export function usePracticeFlow(options: UsePracticeFlowOptions) {
   const resetCompletion = useCallback(() => {
     setState((prev) => {
       if (!prev.finished) return prev;
-      return { ...prev, finished: null };
+      return { ...prev, finished: null, startTime: Date.now() };
     });
   }, []);
 
